@@ -116,7 +116,12 @@ jobs:
           echo "---- probe logcat ----"
           "$ADB" logcat -d -s DGProbe:* AndroidRuntime:E | tail -120 || true
           echo "---- gms/droidguard/binder logcat ----"
-          "$ADB" logcat -d | grep -iE "GmsGuard|GmsServiceBroker|droidguard|RemoteException|SecurityException|Parcel|binder|ANR|Transaction|DGProbe|System.err" | tail -150 || true
+          "$ADB" logcat -d | grep -iE "GmsGuard|GmsServiceBroker|droidguard|RemoteException|SecurityException|Parcel|binder|ANR|Transaction|DGProbe|ActivityManager|System.err" | tail -400 || true
+          echo "---- FULL logcat saved ----"
+          "$ADB" logcat -d > /tmp/logcat.txt || true
+          wc -l /tmp/logcat.txt || true
+          echo "---- dumpsys gms ----"
+          "$ADB" shell "dumpsys activity processes | grep -B2 -A8 -i gms" | head -60 || true
           echo "---- server log ----"
           tail -60 /tmp/server.log || true
           [ -n "$OK" ] || { echo "NO MARKER"; exit 1; }
@@ -130,3 +135,5 @@ jobs:
             /tmp/emulator.log
             /tmp/server.log
             /tmp/begin.json
+            /tmp/logcat.txt
+            /tmp/nsc.xml
