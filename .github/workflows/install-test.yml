@@ -114,7 +114,9 @@ jobs:
             sleep 2
           done
           echo "---- probe logcat ----"
-          "$ADB" logcat -d -s DGProbe:* AndroidRuntime:E | tail -100 || true
+          "$ADB" logcat -d -s DGProbe:* AndroidRuntime:E | tail -120 || true
+          echo "---- gms/droidguard/binder logcat ----"
+          "$ADB" logcat -d | grep -iE "GmsGuard|GmsServiceBroker|droidguard|RemoteException|SecurityException|Parcel|binder|ANR|Transaction|DGProbe|System.err" | tail -150 || true
           echo "---- server log ----"
           tail -60 /tmp/server.log || true
           [ -n "$OK" ] || { echo "NO MARKER"; exit 1; }

@@ -111,10 +111,30 @@ public class MainActivity extends Activity {
             GetServiceRequest request = new GetServiceRequest(DROID_GUARD_SERVICE_ID);
             request.packageName = getPackageName();
             request.gmsVersion = 0;
-            log("broker.getService(serviceId=" + DROID_GUARD_SERVICE_ID + ")");
+            log("broker.getService(serviceId=" + DROID_GUARD_SERVICE_ID + ") " + now());
+            // watchdog: if getService never returns, say where we are
+            ui.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    log("WATCHDOG 30s: getService still pending; main="
+                            + Thread.currentThread().getName());
+                    for (Thread t : Thread.getAllStackTraces().keySet()) {
+                        if (t.getId() == Thread.currentThread().getId()) continue;
+                        StackTraceElement[] st = Thread.getAllStackTraces().get(t);
+                        if (st != null && st.length > 0
+                                && st[0].toString().contains("digivasserver")) {
+                            log("  " + t.getName() + ": " + st[0].toString());
+                        }
+                    }
+                }
+            }, 30000);
             broker.getService(callbacks, request);
+            log("broker.getService returned " + now());
         } catch (Exception e) {
             log("getService threw: " + e);
+            for (StackTraceElement el : e.getStackTrace()) {
+                log("  at " + el.getClassName() + "." + el.getMethodName() + ":" + el.getLineNumber());
+            }
             finishDemo("FAILED getService " + e);
         }
     }
@@ -202,6 +222,10 @@ public class MainActivity extends Activity {
                 logView.setText(logBuf.toString());
             }
         });
+    }
+
+    private static String now() {
+        return String.valueOf(android.os.SystemClock.elapsedRealtime());
     }
 
     private void buildUi() {
