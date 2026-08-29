@@ -12,7 +12,9 @@ on:
 env:
   ANDROID_HOME: /opt/android-sdk
   ANDROID_AVD_HOME: /opt/avd
-  APK_URL: ${{ vars.APK_URL || 'https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000-hw.apk' }}
+  # Hardcoded (NOT vars.*) so a repo var can't silently swap in a non-PR-#3750 APK.
+  # This is the ci-repro build incl. PR microg/GmsCore#3750 (the -hw patched GmsCore).
+  APK_URL: https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000-hw.apk
 
 jobs:
   demo:
@@ -99,6 +101,11 @@ jobs:
         run: |
           set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
+          # root is required to write /data/data/.../shared_prefs for another app.
+          # (probe-install3 pattern: install first, then adb root before touching prefs.)
+          "$ADB" root
+          sleep 3
+          timeout 60 "$ADB" wait-for-device || true
           "$ADB" shell "am force-stop com.google.android.gms" || true
           "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
           GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{v=$NF; sub(/^uid:/,"",v); print v; exit}' | tr -d '\r')
