@@ -58,7 +58,7 @@ jobs:
             -avd test \
             -no-window -no-audio -no-boot-anim \
             -accel auto -gpu swiftshader_indirect \
-            -no-snapshot -no-metrics \
+            -no-snapshot -no-metrics -writable-system \
             -memory 2048 -cores 2 \
             > /tmp/emulator.log 2>&1 &
           EMU_PID=$!
@@ -81,9 +81,8 @@ jobs:
           sleep 3
           "$ADB" wait-for-device
           "$ADB" shell id
-          "$ADB" remount || true
-          "$ADB" shell "mount -o rw,remount /" || true
-          "$ADB" shell "mount -o rw,remount /system" || true
+          "$ADB" remount
+          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE"
 
       - name: Install patched GmsCore as privileged app + reboot
         run: |

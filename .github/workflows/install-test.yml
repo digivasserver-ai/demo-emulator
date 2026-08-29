@@ -52,7 +52,7 @@ jobs:
             -avd test \
             -no-window -no-audio -no-boot-anim \
             -accel auto -gpu swiftshader_indirect \
-            -no-snapshot -no-metrics \
+            -no-snapshot -no-metrics -writable-system \
             -memory 2048 -cores 2 \
             > /tmp/emulator.log 2>&1 &
           EMU_PID=$!
