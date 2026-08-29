@@ -50,6 +50,9 @@ jobs:
       - name: Boot emulator (software accel, headless)
         run: |
           set -euo pipefail  # NO pipefail
+          # KVM device exists but runner user lacks group perms; open it.
+          sudo chmod 0666 /dev/kvm || true
+          ls -l /dev/kvm
           "$ANDROID_HOME/platform-tools/adb" start-server
           nohup "$ANDROID_HOME/emulator/emulator" \
             -avd test \
@@ -61,8 +64,13 @@ jobs:
           EMU_PID=$!
           START=$SECONDS
           echo "emulator pid=$EMU_PID" > /tmp/emu.pid
-          # wait up to 900s for boot
-          for i in $(seq 1 180); do
+          # fast-fail if the emulator process died
+          for i in $(seq 1 120); do
+            if ! kill -0 "$EMU_PID" 2>/dev/null; then
+              echo "EMULATOR PROCESS DIED"
+              tail -40 /tmp/emulator.log
+              exit 1
+            fi
             # Disable pipefail just for this adb call
             set +o pipefail
             BOOT=$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
