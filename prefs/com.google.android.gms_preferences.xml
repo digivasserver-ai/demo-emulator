@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<map>
+    <boolean name="droidguard_enabled" value="true" />
+    <string name="droidguard_mode">Network</string>
+    <string name="droidguard_network_server_url">http://10.0.2.2:8080/</string>
+    <boolean name="droidguard_block_hw_attestation" value="true" />
+</map>
