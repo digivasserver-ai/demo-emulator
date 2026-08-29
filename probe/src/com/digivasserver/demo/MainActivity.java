@@ -115,20 +115,11 @@ public class MainActivity extends Activity {
     private void requestDroidGuardService() {
         try {
             // DroidGuardChimeraService.onBind() returns a DroidGuardServiceBroker
-            // (IGmsServiceBroker), NOT the IDroidGuardService directly. So rawBinder
-            // is the broker; drive the standard getService protocol through it.
-
-            GetServiceRequest request = new GetServiceRequest(DROID_GUARD_SERVICE_ID);
-            request.packageName = getPackageName();
-            request.gmsVersion = 0;
-
-            // ground truth from the installed ci-repro GmsCore DEX:
-            //   IGmsServiceBroker$Stub.onTransact -> getService = 42
-            //   (validateAccount = 46, getWalletServiceWithPackageName = 47,
-            //    INTERFACE_TRANSACTION = 0x5f4e5446)
-            // The client compiled getService=45 (mismatch) so try 42 first, then the
-            // rest; treat the CALLBACK firing (status 0 + service binder) as success.
-            final int[] codes = {42, 45, 41, 25, 26, 24, 23, 46, 47, 28};
+            // (IGmsServiceBroker). Use getDroidGuardService (code 12 per client AIDL)
+            // which takes (IGmsCallbacks, int code, String packageName, Bundle params)
+            // - avoids GetServiceRequest parcel layout mismatch with the server.
+            // Sweep the client's code 12 plus plausible fallbacks.
+            final int[] codes = {12, 42, 45, 41, 25, 26, 24, 23, 46, 47, 28};
             log("broker code sweep: " + java.util.Arrays.toString(codes));
             for (final int code : codes) {
                 cbResult = null;
@@ -140,7 +131,10 @@ public class MainActivity extends Activity {
                 try {
                     data.writeInterfaceToken("com.google.android.gms.common.internal.IGmsServiceBroker");
                     data.writeStrongBinder(callbacks.asBinder());
-                    request.writeToParcel(data, 0);
+                    // getDroidGuardService reads: int code, String packageName, Bundle params
+                    data.writeInt(DROID_GUARD_SERVICE_ID);
+                    data.writeString(getPackageName());
+                    data.writeBundle(null);  // no extra params
                     transacted = rawBinder.transact(code, data, reply, 0);
                     reply.readException();
                     log("code " + code + " transact=" + transacted + " @ " + now());
