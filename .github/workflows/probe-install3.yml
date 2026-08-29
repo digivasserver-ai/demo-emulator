@@ -81,15 +81,10 @@ jobs:
           echo "GMS_UID=$GMS_UID"
           [ -n "$GMS_UID" ] || { echo "could not resolve gms uid"; exit 1; }
           "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
-          "$ADB" shell "cat > /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml" <<'EOF'
-<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<map>
-    <boolean name="droidguard_enabled" value="true" />
-    <string name="droidguard_mode">Network</string>
-    <string name="droidguard_network_server_url">http://10.0.2.2:8080/</string>
-    <boolean name="droidguard_block_hw_attestation" value="true" />
-</map>
-EOF
+          # prefs written from base64 (avoids column-0 heredoc truncating the YAML block scalar,
+          # which produced phantom 0-job/failed runs). Decode on host, pipe into adb shell cat.
+          printf '%s' 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiIHN0YW5kYWxvbmU9InllcyIgPz4KPG1hcD4KICAgIDxib29sZWFuIG5hbWU9ImRyb2lkZ3VhcmRfZW5hYmxlZCIgdmFsdWU9InRydWUiIC8+CiAgICA8c3RyaW5nIG5hbWU9ImRyb2lkZ3VhcmRfbW9kZSI+TmV0d29yazwvc3RyaW5nPgogICAgPHN0cmluZyBuYW1lPSJkcm9pZGd1YXJkX25ldHdvcmtfc2VydmVyX3VybCI+aHR0cDovLzEwLjAuMi4yOjgwODAvPC9zdHJpbmc+CiAgICA8Ym9vbGVhbiBuYW1lPSJkcm9pZGd1YXJkX2Jsb2NrX2h3X2F0dGVzdGF0aW9uIiB2YWx1ZT0idHJ1ZSIgLz4KPC9tYXA+' | base64 -d > /tmp/prefs.xml
+          "$ADB" shell "cat > /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml" < /tmp/prefs.xml
           "$ADB" shell "chown -R $GMS_UID:$GMS_UID /data/data/com.google.android.gms/shared_prefs"
           "$ADB" shell "chmod 660 /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
           "$ADB" shell "cat /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
