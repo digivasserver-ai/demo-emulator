@@ -66,10 +66,23 @@ jobs:
 
       - name: Install apps + write DroidGuard prefs
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/opt/android-sdk}"
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000.apk" -o /tmp/gms.apk || { echo "APK download failed"; exit 1; }
           ls -la /tmp/gms.apk
+          echo "===== dexdump IGmsServiceBroker stub ====="
+          cd /tmp && rm -rf dex-x && mkdir dex-x && cd dex-x
+          unzip -o -q /tmp/gms.apk "classes*.dex"
+          for d in classes*.dex; do
+            "$ANDROID_HOME/build-tools/34.0.0/dexdump" -d "$d" > dd.txt 2>/dev/null || true
+            if grep -q "IGmsServiceBroker" dd.txt; then
+              echo "=== $d ==="
+              grep -E "Class descriptor|name\s+: '(getService|onTransact|validateAccount|getWalletServiceWithPackageName)'|static fields|TRANSACTION" dd.txt | head -40
+            fi
+          done
+          rm -rf /tmp/dex-x
+          echo "===== end dexdump ====="
           # microG's assembleRelease output is unsigned; sign for install
           keytool -genkeypair -keystore /tmp/demo.keystore -alias demo \
             -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android \
