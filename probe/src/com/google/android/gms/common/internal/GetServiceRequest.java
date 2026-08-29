@@ -10,7 +10,7 @@ import android.os.Parcelable;
  * needs are written; the reader tolerates absent optional fields.
  */
 public class GetServiceRequest implements Parcelable {
-    public final int serviceId;
+    public int serviceId;
     public int gmsVersion;
     public String packageName;
     public Bundle extras;
