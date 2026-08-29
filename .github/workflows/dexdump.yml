@@ -28,5 +28,9 @@ jobs:
           DEXDUMP="$HOME/android-sdk/build-tools/35.0.0/dexdump"
           for d in classes*.dex; do
             echo "===== $d ====="
-            "$DEXDUMP" -d "$d" 2>/dev/null | awk '/Class descriptor/{if ($0 ~ /IGmsServiceBroker\$Stub/) f=1; else if (f) exit} f' | grep -E "TRANSACTION|name|const|#\(in|type" | head -80
+            "$DEXDUMP" -d "$d" 2>/dev/null > dd.txt
+            grep -c "Class descriptor" dd.txt
+            grep -E "Class descriptor.*(ServiceBroker|IGmsService|droidguard)" dd.txt | head -20
+            echo "--- broker-ish method names ---"
+            grep -E "name\s+: '(getService|onTransact|validateAccount|getDroidGuard)'" dd.txt | head -20
           done
