@@ -13,19 +13,20 @@ jobs:
           sha256sum /tmp/gms.apk
       - name: Install SDK build-tools
         run: |
-          export ANDROID_HOME=/opt/android-sdk
-          mkdir -p "$ANDROID_HOME/cmdline-tools/latest/bin"
+          export ANDROID_HOME="$HOME/android-sdk"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
           curl -sSL -o /tmp/cmdline.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
           unzip -q -o /tmp/cmdline.zip -d "$ANDROID_HOME/cmdline-tools"
           mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;35.0.0" >/dev/null 2>&1
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses < /dev/null >/dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;35.0.0" >/dev/null 2>&1 || { echo SDKMAN_FAIL; ls "$ANDROID_HOME/cmdline-tools/latest/bin"; exit 1; }
       - name: Dexdump IGmsServiceBroker\$Stub
         run: |
           cd /tmp && mkdir -p x && cd x
           unzip -o -q /tmp/gms.apk "classes*.dex"
           ls -la classes*.dex
+          DEXDUMP="$HOME/android-sdk/build-tools/35.0.0/dexdump"
           for d in classes*.dex; do
             echo "===== $d ====="
-            /opt/android-sdk/build-tools/35.0.0/dexdump -d "$d" 2>/dev/null | awk '/Class descriptor.*IGmsServiceBroker\$Stub/{f=1} f{print} f&&/^$/&&seen{exit} f{seen=1}' | grep -E "TRANSACTION|invoke|const|onTransact|method" | head -80
+            "$DEXDUMP" -d "$d" 2>/dev/null | awk '/Class descriptor.*IGmsServiceBroker\$Stub/{f=1} f{print} f&&/^$/&&seen{exit} f{seen=1}' | grep -E "TRANSACTION|const|onTransact|method|Direct|Virtual" | head -100
           done
