@@ -70,7 +70,13 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000.apk" -o /tmp/gms.apk || { echo "APK download failed"; exit 1; }
           ls -la /tmp/gms.apk
-          "$ADB" install -r /tmp/gms.apk
+          # microG's assembleRelease output is unsigned; sign for install
+          keytool -genkeypair -keystore /tmp/demo.keystore -alias demo \
+            -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android \
+            -dname "CN=Demo,O=Demo,C=US" > /dev/null 2>&1
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks /tmp/demo.keystore --ks-pass pass:android \
+            --out /tmp/gms-signed.apk /tmp/gms.apk
+          "$ADB" install -r /tmp/gms-signed.apk
           "$ADB" install -r probe/build/demo.apk
           "$ADB" root
           sleep 3
