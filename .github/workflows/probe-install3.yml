@@ -92,7 +92,8 @@ jobs:
           sleep 3
           timeout 60 "$ADB" wait-for-device || true
           # resolve the gms uid precisely
-          GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{print $NF; exit}' | tr -d '\r')
+          # awk prints e.g. "uid:10071"; strip the "uid:" prefix so chown gets a numeric uid.
+          GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{v=$NF; sub(/^uid:/,"",v); print v; exit}' | tr -d '\r')
           echo "GMS_UID=$GMS_UID"
           [ -n "$GMS_UID" ] || { echo "could not resolve gms uid"; exit 1; }
           "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
