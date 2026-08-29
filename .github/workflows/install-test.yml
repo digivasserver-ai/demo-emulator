@@ -1,15 +1,15 @@
 name: "Demo: microG install-test"
 
-# Phase 2a: install the patched GmsCore (built by ci-repro) as a privileged
-# app on the ATD emulator, configure DroidGuard remote mode, and verify the
-# multi-step reference server responds. No video yet — prove the wiring first.
+# Phase 2a: install the patched GmsCore (built by ci-repro with the demo
+# cleartext allowance for 10.0.2.2) as a USER app, write DroidGuard remote
+# mode prefs, run the PR's multi-step reference server on the runner, drive
+# the flow with the probe app, and verify the marker.
 #
-# Writability strategy (no `adb reboot`, which hangs on ATD images):
-#   - boot with -writable-system: writes to /system persist in the AVD qcow2
-#   - adb remount arms overlayfs; it applies at the NEXT kernel boot, which
-#     we trigger by relaunching the emulator process (not guest reboot)
-#   - after installing priv-app + CA cert, `adb shell stop && start` restarts
-#     the framework (package scan + conscrypt reload) without rebooting
+# Why no /system writes at all: the APK's network security config trusts
+# cleartext to the emulator host alias 10.0.2.2, so droidguard can POST to
+# the reference server over plain HTTP (the PR server is byte-identical,
+# untouched). User apps + a writable /data are enough -> no remount, no
+# reboot, no CA, no priv-app.
 on:
   workflow_dispatch:
 
@@ -31,7 +31,7 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Install SDK + emulator + system image
+      - name: Install SDK + emulator + system image + build-tools
         run: |
           set -euxo pipefail
           sudo mkdir -p "$ANDROID_HOME" && sudo chown -R "$USER": "$ANDROID_HOME"
@@ -41,7 +41,7 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
             "platform-tools" "emulator" \
-            "platforms;android-30" \
+            "platforms;android-30" "build-tools;34.0.0" \
             "system-images;android-30;aosp_atd;x86_64" > /dev/null
 
       - name: Create AVD
@@ -59,7 +59,7 @@ jobs:
             -avd test \
             -no-window -no-audio -no-boot-anim \
             -accel auto -gpu swiftshader_indirect \
-            -no-snapshot -no-metrics -writable-system \
+            -no-snapshot -no-metrics \
             -memory 2048 -cores 2 \
             > /tmp/emulator.log 2>&1 &
           EMU_PID=$!
@@ -74,94 +74,74 @@ jobs:
           done
           [ "$BOOT" = "1" ] || { echo "BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
 
-      - name: arm overlayfs (remount) + relaunch emulator for writable /system
-        run: |
-          set -euxo pipefail
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" root
-          sleep 3
-          timeout 60 "$ADB" wait-for-device || true
-          "$ADB" shell id
-          # arms overlayfs; applied at next kernel boot (steps below)
-          timeout 60 "$ADB" remount || echo "remount reported failure (ok if kept read-only for now)"
-          # graceful emulator exit (flushes AVD qcow2), then fresh kernel boot
-          timeout 60 "$ADB" emu kill || true
-          sleep 5
-          pkill -f 'emulator.*-avd test' || true
-          sleep 5
-          # relaunch: overlayfs is now armed and applies on this boot
-          nohup "$ANDROID_HOME/emulator/emulator" \
-            -avd test \
-            -no-window -no-audio -no-boot-anim \
-            -accel auto -gpu swiftshader_indirect \
-            -no-snapshot -no-metrics -writable-system \
-            -memory 2048 -cores 2 \
-            > /tmp/emulator.log 2>&1 &
-          EMU_PID=$!
-          START=$SECONDS
-          for i in $(seq 1 120); do
-            if ! kill -0 "$EMU_PID" 2>/dev/null; then echo "EMULATOR DIED (relaunch)"; tail -40 /tmp/emulator.log; exit 1; fi
-            set +o pipefail
-            BOOT=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            set -o pipefail
-            if [ "$BOOT" = "1" ]; then echo "relaunch_boot_seconds=$((SECONDS - START))"; break; fi
-            sleep 3
-          done
-          [ "$BOOT" = "1" ] || { echo "RELAUNCH BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
-          "$ADB" root
-          sleep 3
-          timeout 60 "$ADB" wait-for-device || true
-          "$ADB" shell "id"
-          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE" || { echo "STILL READ-ONLY"; "$ADB" shell "mount | grep -E 'overlay| /system '" || true; exit 1; }
+      - name: Build probe APK (runner)
+        run: bash probe/build_apk.sh
 
-      - name: Install GmsCore as privileged app + CA cert, restart framework
+      - name: Install GmsCore + probe, write DroidGuard prefs
         run: |
           set -euxo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "$APK_URL" -o /tmp/gms.apk || { echo "APK download failed ($APK_URL)"; exit 1; }
           ls -la /tmp/gms.apk
-          # demo CA so the emulator trusts our TLS droidguard server
-          CERT=$(ls demo-certs/ca-*.0 2>/dev/null | head -1)
-          if [ -n "$CERT" ]; then
-            "$ADB" push "$CERT" /system/etc/security/cacerts/
-            "$ADB" shell "chmod 644 /system/etc/security/cacerts/$(basename "$CERT")"
-            echo "CA pushed: $(basename "$CERT")"
-          else
-            echo "no demo CA in repo; skipping (phase 2b adds it)"
-          fi
-          "$ADB" shell "mkdir -p /system/priv-app/MicroGGmsCore"
-          "$ADB" push /tmp/gms.apk /system/priv-app/MicroGGmsCore/gms.apk
-          "$ADB" shell "chmod 644 /system/priv-app/MicroGGmsCore/gms.apk"
-          "$ADB" shell "ls -la /system/priv-app/MicroGGmsCore/"
-          # framework restart = package scan + conscrypt reload, no reboot
-          timeout 60 "$ADB" shell "stop && start" || true
-          for i in $(seq 1 120); do
-            set +o pipefail
-            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            set -o pipefail
-            if [ "$B" = "1" ]; then echo "framework restarted"; break; fi
-            sleep 3
-          done
+          "$ADB" install -r /tmp/gms.apk
+          "$ADB" install -r probe/build/demo.apk
           "$ADB" root
           sleep 3
           timeout 60 "$ADB" wait-for-device || true
+          # resolve the gms uid precisely
+          GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{print $NF; exit}' | tr -d '\r')
+          echo "GMS_UID=$GMS_UID"
+          [ -n "$GMS_UID" ] || { echo "could not resolve gms uid"; exit 1; }
+          "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
+          "$ADB" shell "cat > /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<map>
+    <boolean name="droidguard_enabled" value="true" />
+    <string name="droidguard_mode">Network</string>
+    <string name="droidguard_network_server_url">http://10.0.2.2:8080/</string>
+    <boolean name="droidguard_block_hw_attestation" value="true" />
+</map>
+EOF
+          "$ADB" shell "chown -R $GMS_UID:$GMS_UID /data/data/com.google.android.gms/shared_prefs"
+          "$ADB" shell "chmod 660 /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
+          "$ADB" shell "cat /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
 
-      - name: Verify install (pm list / appops)
+      - name: Start reference droidguard server (runner)
         run: |
+          set -euxo pipefail
+          python3 -c "import sys; sys.path.insert(0, 'droidguard-server'); import droidguard_multistep_server" || true
+          nohup python3 droidguard-server/droidguard_multistep_server.py --host 0.0.0.0 --port 8080 > /tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          sleep 3
+          cat /tmp/server.log
+          curl -s "http://127.0.0.1:8080/?action=begin&flow=test&source=test" -o /tmp/begin.json -w "HTTP %{http_code}\n" || true
+          head -c 300 /tmp/begin.json 2>/dev/null || true
+
+      - name: Run probe (AIDL->snapshot->close), verify marker
+        run: |
+          set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" shell "pm list packages | grep -i gms" || true
-          "$ADB" shell "pm path com.google.android.gms" || true
-          "$ADB" shell "dumpsys package com.google.android.gms | grep -E 'userId=|versionName|enabled=' | head -5" || true
+          "$ADB" shell "rm -f /data/data/com.digivasserver.demo/demo_result.txt" || true
+          "$ADB" shell "am start -n com.digivasserver.demo/.MainActivity"
+          OK=""
+          for i in $(seq 1 60); do
+            R=$("$ADB" shell "cat /data/data/com.digivasserver.demo/demo_result.txt 2>/dev/null | tr -d '\r'" || echo "")
+            if [ -n "$R" ]; then echo "demo marker: $R"; OK=1; break; fi
+            sleep 2
+          done
+          echo "---- probe logcat ----"
+          "$ADB" logcat -d -s DGProbe:* AndroidRuntime:E | tail -100 || true
+          echo "---- server log ----"
+          tail -60 /tmp/server.log || true
+          [ -n "$OK" ] || { echo "NO MARKER (probe result missing)"; exit 1; }
 
-      - name: Install patched droidguard server (python) on runner
-        run: |
-          echo "placeholder: droidguard_multistep_server.py will be dropped here in phase 2b"
-
-      - name: Upload artifacts (logs/screenshot)
+      - name: Upload artifacts (logs)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: install-test
           path: |
             /tmp/emulator.log
+            /tmp/server.log
+            /tmp/begin.json
             *.txt

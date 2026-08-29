@@ -155,7 +155,7 @@ public class MainActivity extends Activity {
         log("=== " + marker + " ===");
         logView.setTextColor(marker.startsWith("DEMO") ? Color.rgb(0x2e, 0x7d, 0x32)
                 : Color.rgb(0xb3, 0x1b, 0x1b));
-        writeMarker("/sdcard/demo_result.txt", marker, ui);
+        writeMarker(getApplicationInfo().dataDir + "/demo_result.txt", marker, ui);
         try {
             unbindService(connection);
         } catch (Exception ignored) {
