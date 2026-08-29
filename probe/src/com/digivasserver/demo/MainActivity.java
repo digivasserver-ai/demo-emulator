@@ -42,14 +42,18 @@ public class MainActivity extends Activity {
     private TextView logView;
     private StringBuilder logBuf = new StringBuilder();
 
-    private volatile IGmsServiceBroker broker;
+    private volatile IBinder rawBinder;
     private volatile boolean done = false;
+
+    // sweep state: what the most recent getService attempt produced
+    private volatile java.util.concurrent.CountDownLatch cbLatch = new java.util.concurrent.CountDownLatch(1);
+    private volatile Object cbResult; // null | "status:N" | IDroidGuardService
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder binder) {
             log("binder: " + name.flattenToShortString());
-            broker = IGmsServiceBroker.Stub.asInterface(binder);
+            rawBinder = binder;
             requestDroidGuardService();
         }
 
@@ -63,12 +67,14 @@ public class MainActivity extends Activity {
         @Override
         public void onPostInitComplete(int statusCode, IBinder binder, Bundle params) {
             if (statusCode != 0) {
-                log("onPostInitComplete status=" + statusCode);
-                finishDemo("FAILED pre-init " + statusCode);
+                log("callback status=" + statusCode);
+                cbResult = "status:" + statusCode;
+                cbLatch.countDown();
                 return;
             }
-            IDroidGuardService svc = IDroidGuardService.Stub.asInterface(binder);
-            runDroidGuardDemo(svc);
+            log("callback onPostInitComplete(0) @ " + now());
+            cbResult = IDroidGuardService.Stub.asInterface(binder);
+            cbLatch.countDown();
         }
 
         @Override
@@ -111,31 +117,56 @@ public class MainActivity extends Activity {
             GetServiceRequest request = new GetServiceRequest(DROID_GUARD_SERVICE_ID);
             request.packageName = getPackageName();
             request.gmsVersion = 0;
-            log("broker.getService(serviceId=" + DROID_GUARD_SERVICE_ID + ") " + now());
-            // watchdog: if getService never returns, say where we are
-            ui.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    log("WATCHDOG 30s: getService still pending; main="
-                            + Thread.currentThread().getName());
-                    for (Thread t : Thread.getAllStackTraces().keySet()) {
-                        if (t.getId() == Thread.currentThread().getId()) continue;
-                        StackTraceElement[] st = Thread.getAllStackTraces().get(t);
-                        if (st != null && st.length > 0
-                                && st[0].toString().contains("digivasserver")) {
-                            log("  " + t.getName() + ": " + st[0].toString());
-                        }
-                    }
+
+            // The broker stub in the installed microG build may assign getService a
+            // different transaction code than this client was compiled with. Sweep
+            // the plausible codes with a raw transact and treat the CALLBACK firing
+            // (status 0 + service binder) as the real success signal.
+            final int[] codes = {45, 41, 25, 26, 24, 23, 46, 47, 28};
+            log("broker code sweep: " + java.util.Arrays.toString(codes));
+            for (final int code : codes) {
+                cbResult = null;
+                cbLatch = new java.util.concurrent.CountDownLatch(1);
+                log("try code " + code + " @ " + now());
+                android.os.Parcel data = android.os.Parcel.obtain();
+                android.os.Parcel reply = android.os.Parcel.obtain();
+                boolean transacted = false;
+                try {
+                    data.writeInterfaceToken("com.google.android.gms.common.internal.IGmsServiceBroker");
+                    data.writeStrongBinder(callbacks.asBinder());
+                    request.writeToParcel(data, 0);
+                    transacted = rawBinder.transact(code, data, reply, 0);
+                    reply.readException();
+                    log("code " + code + " transact=" + transacted + " @ " + now());
+                } catch (Exception e) {
+                    log("code " + code + " threw: " + e);
+                } finally {
+                    data.recycle();
+                    reply.recycle();
                 }
-            }, 30000);
-            broker.getService(callbacks, request);
-            log("broker.getService returned " + now());
+                try {
+                    boolean fired = cbLatch.await(6, java.util.concurrent.TimeUnit.SECONDS);
+                    log("code " + code + " callbackFired=" + fired);
+                } catch (InterruptedException ie) {
+                    log("sweep interrupted: " + ie);
+                }
+                Object got = cbResult;
+                if (got instanceof IDroidGuardService) {
+                    log("MATCHED code " + code + " -> IDroidGuardService");
+                    runDroidGuardDemo((IDroidGuardService) got);
+                    return;
+                }
+                if (got != null) {
+                    log("code " + code + " produced " + got + " (not droidguard)");
+                }
+            }
+            finishDemo("FAILED no broker code matched");
         } catch (Exception e) {
-            log("getService threw: " + e);
+            log("sweep threw: " + e);
             for (StackTraceElement el : e.getStackTrace()) {
                 log("  at " + el.getClassName() + "." + el.getMethodName() + ":" + el.getLineNumber());
             }
-            finishDemo("FAILED getService " + e);
+            finishDemo("FAILED sweep " + e);
         }
     }
 
