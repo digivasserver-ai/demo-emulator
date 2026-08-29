@@ -114,15 +114,21 @@ public class MainActivity extends Activity {
 
     private void requestDroidGuardService() {
         try {
+            // DroidGuardChimeraService.onBind() returns a DroidGuardServiceBroker
+            // (IGmsServiceBroker), NOT the IDroidGuardService directly. So rawBinder
+            // is the broker; drive the standard getService protocol through it.
+
             GetServiceRequest request = new GetServiceRequest(DROID_GUARD_SERVICE_ID);
             request.packageName = getPackageName();
             request.gmsVersion = 0;
 
-            // The broker stub in the installed microG build may assign getService a
-            // different transaction code than this client was compiled with. Sweep
-            // the plausible codes with a raw transact and treat the CALLBACK firing
-            // (status 0 + service binder) as the real success signal.
-            final int[] codes = {45, 41, 25, 26, 24, 23, 46, 47, 28};
+            // ground truth from the installed ci-repro GmsCore DEX:
+            //   IGmsServiceBroker$Stub.onTransact -> getService = 42
+            //   (validateAccount = 46, getWalletServiceWithPackageName = 47,
+            //    INTERFACE_TRANSACTION = 0x5f4e5446)
+            // The client compiled getService=45 (mismatch) so try 42 first, then the
+            // rest; treat the CALLBACK firing (status 0 + service binder) as success.
+            final int[] codes = {42, 45, 41, 25, 26, 24, 23, 46, 47, 28};
             log("broker code sweep: " + java.util.Arrays.toString(codes));
             for (final int code : codes) {
                 cbResult = null;
