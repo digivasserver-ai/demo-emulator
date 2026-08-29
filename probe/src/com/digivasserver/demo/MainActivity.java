@@ -115,10 +115,33 @@ public class MainActivity extends Activity {
     private void requestDroidGuardService() {
         try {
             // DroidGuardChimeraService.onBind() returns a DroidGuardServiceBroker
-            // (IGmsServiceBroker). Use getDroidGuardService (code 12 per client AIDL)
-            // which takes (IGmsCallbacks, int code, String packageName, Bundle params)
-            // - avoids GetServiceRequest parcel layout mismatch with the server.
-            // Sweep the client's code 12 plus plausible fallbacks.
+            // (IGmsServiceBroker). The client AIDL defines getDroidGuardService=12.
+            // Try the compiled proxy first (correct parcel format); if it fails, sweep.
+            log("trying client getDroidGuardService (code 12) via AIDL proxy");
+            cbResult = null;
+            cbLatch = new java.util.concurrent.CountDownLatch(1);
+            try {
+                IGmsServiceBroker broker = IGmsServiceBroker.Stub.asInterface(rawBinder);
+                broker.getDroidGuardService(callbacks, DROID_GUARD_SERVICE_ID, getPackageName(), null);
+                boolean fired = cbLatch.await(8, java.util.concurrent.TimeUnit.SECONDS);
+                log("proxy getDroidGuardService callbackFired=" + fired);
+                Object got = cbResult;
+                if (got instanceof IDroidGuardService) {
+                    log("MATCHED via proxy getDroidGuardService -> IDroidGuardService");
+                    runDroidGuardDemo((IDroidGuardService) got);
+                    return;
+                }
+                if (got != null) {
+                    log("proxy getDroidGuardService produced " + got + " (not droidguard)");
+                }
+            } catch (Exception e) {
+                log("proxy getDroidGuardService threw: " + e);
+            }
+
+            // Fallback: sweep raw transact codes (server may use different code for getDroidGuardService).
+            // Known from DEX: getService=42, validateAccount=46, getWalletServiceWithPackageName=47.
+            // getDroidGuardService is in the packed-switch (code varies).
+            log("falling back to raw transact sweep");
             final int[] codes = {12, 42, 45, 41, 25, 26, 24, 23, 46, 47, 28};
             log("broker code sweep: " + java.util.Arrays.toString(codes));
             for (final int code : codes) {
@@ -131,10 +154,9 @@ public class MainActivity extends Activity {
                 try {
                     data.writeInterfaceToken("com.google.android.gms.common.internal.IGmsServiceBroker");
                     data.writeStrongBinder(callbacks.asBinder());
-                    // getDroidGuardService reads: int code, String packageName, Bundle params
                     data.writeInt(DROID_GUARD_SERVICE_ID);
                     data.writeString(getPackageName());
-                    data.writeBundle(null);  // no extra params
+                    data.writeBundle(null);
                     transacted = rawBinder.transact(code, data, reply, 0);
                     reply.readException();
                     log("code " + code + " transact=" + transacted + " @ " + now());
