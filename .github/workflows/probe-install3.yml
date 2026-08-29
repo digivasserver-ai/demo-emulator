@@ -1,22 +1,10 @@
-name: probe-install
-
-# Phase 2a: install the patched GmsCore (built by ci-repro with the demo
-# cleartext allowance for 10.0.2.2) as a USER app, write DroidGuard remote
-# mode prefs, run the PR's multi-step reference server on the runner, drive
-# the flow with the probe app, and verify the marker.
-#
-# Why no /system writes at all: the APK's network security config trusts
-# cleartext to the emulator host alias 10.0.2.2, so droidguard can POST to
-# the reference server over plain HTTP (the PR server is byte-identical,
-# untouched). User apps + a writable /data are enough -> no remount, no
-# reboot, no CA, no priv-app.
-on:
-  workflow_dispatch:
+name: probe-install3
+on: workflow_dispatch
 
 env:
   ANDROID_HOME: /opt/android-sdk
   ANDROID_AVD_HOME: /opt/avd
-  APK_URL: ${{ vars.APK_URL || 'https://github.com/digivasserver-ai/ci-repro/releases/download/apks-latest/microg-services.apk' }}
+  APK_URL: https://github.com/digivasserver-ai/ci-repro/releases/download/apks-latest/microg-services.apk
 
 jobs:
   install-test:
