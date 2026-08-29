@@ -1,14 +1,5 @@
 name: "Emulator boot dry-run"
 
-# Phase 1 feasibility probe: can we boot a headless Android emulator on a
-# GitHub-hosted runner (no /dev/kvm) in acceptable time, and is the image
-# rootable/remountable for privileged microG install later?
-#
-# Expected outputs (uploaded as artifacts):
-#   - boot-time.txt   (time to sys.boot_completed)
-#   - sysinfo.txt     (boot_completed, ro.debuggable, adb root result)
-#   - screenshot.png  (post-boot screencap)
-
 on:
   workflow_dispatch:
 
@@ -52,7 +43,7 @@ jobs:
 
       - name: Boot emulator (software accel, headless)
         run: |
-          set -euxo pipefail
+          set -euo pipefail  # NO pipefail
           "$ANDROID_HOME/platform-tools/adb" start-server
           nohup "$ANDROID_HOME/emulator/emulator" \
             -avd test \
@@ -61,29 +52,38 @@ jobs:
             -no-snapshot -no-metrics \
             -memory 2048 -cores 2 \
             > /tmp/emulator.log 2>&1 &
+          EMU_PID=$!
           START=$SECONDS
+          echo "emulator pid=$EMU_PID" > /tmp/emu.pid
           # wait up to 900s for boot
           for i in $(seq 1 180); do
-            BOOT=$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            if [ "$BOOT" = "1" ]; then break; fi
+            # Disable pipefail just for this adb call
+            set +o pipefail
+            BOOT=$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            set -o pipefail
+            if [ "$BOOT" = "1" ]; then
+              echo "boot_seconds=$((SECONDS - START))" | tee boot-time.txt
+              break
+            fi
             sleep 5
           done
-          echo "boot_seconds=$((SECONDS - START))" | tee boot-time.txt
-          if [ "$BOOT" != "1" ]; then echo "BOOT TIMEOUT"; tail -20 /tmp/emulator.log; exit 1; fi
+          if [ "$BOOT" != "1" ]; then
+            echo "BOOT TIMEOUT after $((SECONDS - START))s"
+            tail -50 /tmp/emulator.log
+            exit 1
+          fi
 
       - name: Post-boot diagnostics
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           {
             echo "boot_completed=$($ADB shell getprop sys.boot_completed | tr -d '\r')"
             echo "ro.debuggable=$($ADB shell getprop ro.debuggable | tr -d '\r')"
             echo "ro.build.version.sdk=$($ADB shell getprop ro.build.version.sdk | tr -d '\r')"
             echo "ro.product.model=$($ADB shell getprop ro.product.model | tr -d '\r')"
-            echo "adb_root_pre=$($ADB shell 'su -c id' 2>/dev/null | tr -d '\r' || echo 'su unavailable')"
             $ADB root > /dev/null 2>&1 || true
             sleep 2
-            echo "adb_root_post=$(id 2>/dev/null || true)"
             echo "id_after=$($ADB shell id 2>/dev/null | tr -d '\r')"
           } | tee sysinfo.txt
           "$ADB" exec-out screencap -p > screenshot.png
