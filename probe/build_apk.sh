@@ -22,9 +22,10 @@ ls "$PLATFORM" >/dev/null
 BUILD="$ROOT/build"
 rm -rf "$BUILD" && mkdir -p "$BUILD/cls" "$BUILD/dexout"
 
-# 1) javac (Android API 30 bootclasspath)
+# 1) javac (Android API 30 bootclasspath; source/target 8 because
+#    -bootclasspath is not allowed with target 11 on JDK 17)
 find "$ROOT/src" -name '*.java' > "$BUILD/sources.txt"
-javac -source 11 -target 11 -bootclasspath "$PLATFORM" \
+javac -source 8 -target 8 -bootclasspath "$PLATFORM" \
   -d "$BUILD/cls" @"$BUILD/sources.txt"
 echo "classes: $(find "$BUILD/cls" -name '*.class' | wc -l)"
 
