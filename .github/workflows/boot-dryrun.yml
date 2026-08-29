@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /opt/android-sdk
+      ANDROID_AVD_HOME: /home/runner/.android/avd
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -38,8 +39,13 @@ jobs:
 
       - name: Create AVD
         run: |
+          mkdir -p "$ANDROID_AVD_HOME"
           echo "no" | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
             -n test -k "system-images;android-30;aosp_atd;x86_64" --force
+          echo "--- avd dir ---"
+          ls -la "$ANDROID_AVD_HOME"/ 2>&1 || true
+          echo "--- avds seen by emulator ---"
+          "$ANDROID_HOME/emulator/emulator" -list-avds 2>&1 || true
 
       - name: Boot emulator (software accel, headless)
         run: |
@@ -48,7 +54,7 @@ jobs:
           nohup "$ANDROID_HOME/emulator/emulator" \
             -avd test \
             -no-window -no-audio -no-boot-anim \
-            -accel off -gpu swiftshader_indirect \
+            -accel auto -gpu swiftshader_indirect \
             -no-snapshot -no-metrics \
             -memory 2048 -cores 2 \
             > /tmp/emulator.log 2>&1 &
@@ -89,6 +95,7 @@ jobs:
           "$ADB" exec-out screencap -p > screenshot.png
 
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: boot-dryrun
