@@ -74,7 +74,19 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "$APK_URL" -o /tmp/gms.apk || { echo "APK download failed ($APK_URL)"; exit 1; }
           ls -la /tmp/gms.apk
-          "$ADB" install -r /tmp/gms.apk
+          # ci-repro publishes the patched GmsCore WITHOUT a signature (no v1/v2/v3
+          # signing block) -> adb install fails with INSTALL_PARSE_FAILED_NO_CERTIFICATES.
+          # Re-sign with a throwaway debug key so it is installable.
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          keytool -genkeypair -v -keystore /tmp/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          "$APKSIGNER" sign --ks /tmp/debug.keystore --ks-pass pass:android --key-pass pass:android \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out /tmp/gms-signed.apk /tmp/gms.apk
+          "$APKSIGNER" verify --print-certs /tmp/gms-signed.apk || true
+          ls -la /tmp/gms-signed.apk
+          "$ADB" install -r /tmp/gms-signed.apk
           "$ADB" install -r probe/build/demo.apk
           "$ADB" root
           sleep 3
