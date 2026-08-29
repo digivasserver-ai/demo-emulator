@@ -131,7 +131,8 @@ jobs:
           "$ADB" shell "ls /system/etc/security/cacerts/ | grep ca-$HASH" || true
           "$ADB" shell "am force-stop com.google.android.gms" || true
           "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
-          GMS_UID=$("$ADB" shell "stat -c %u /data/data/com.google.android.gms 2>/dev/null | tr -d '\r'")
+          GMS_UID=$("$ADB" shell "cmd package list packages --uid com.google.android.gms 2>/dev/null | sed -n 's/.*uid:\\([0-9]*\\).*/\\1/p' | tr -d '\r'")
+          [ -n "$GMS_UID" ] || GMS_UID=$("$ADB" shell "dumpsys package com.google.android.gms | grep -m1 'userId=' | sed 's/.*userId=\\([0-9]*\\).*/\\1/' | tr -d '\r'")
           echo "GmsCore uid=$GMS_UID"
           "$ADB" shell "cat > /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml" <<'EOF'
 <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
