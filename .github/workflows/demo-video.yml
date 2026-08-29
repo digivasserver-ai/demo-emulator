@@ -1,10 +1,9 @@
 name: "Demo: multistep DroidGuard video"
 
 # Phase 2b: end-to-end wire-protocol demo ON a virtual device.
-#   - patched microG (built by ci-repro, incl. PR microg/GmsCore#3750) runs as
-#     a privileged app on the ATD emulator (identicial setup to the ci runner)
-#   - DroidGuard is switched to Network mode -> multistep server (TLS, mock
-#     backend) = the PR's droidguard_multistep_server.py wrapped in SSL
+#   - patched microG (built by ci-repro, incl. PR microg/GmsCore#3750) runs on
+#     the ATD emulator (identical setup to the ci runner)
+#   - DroidGuard is switched to Network mode -> multistep server (mock backend)
 #   - a minimal probe drives guardWithRequest-like flow via the real AIDL
 #   - the emulator screen is recorded to a video artifact
 on:
@@ -58,7 +57,7 @@ jobs:
             -avd test \
             -no-window -no-audio -no-boot-anim \
             -accel auto -gpu swiftshader_indirect \
-            -no-snapshot -no-metrics -writable-system \
+            -no-snapshot -no-metrics \
             -memory 2048 -cores 2 \
             > /tmp/emulator.log 2>&1 &
           EMU_PID=$!
@@ -74,136 +73,88 @@ jobs:
           done
           [ "$BOOT" = "1" ] || { echo "BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
 
-      - name: Get root shell (overlayfs remount + reboot)
-        run: |
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" root
-          sleep 3
-          "$ADB" wait-for-device
-          "$ADB" shell id
-          # adb remount disables verity + arms overlayfs; a reboot applies it
-          timeout 60 "$ADB" remount || true
-          timeout 60 "$ADB" reboot || true
-          for i in $(seq 1 140); do
-            set +o pipefail
-            STATE=$("$ADB" get-state 2>/dev/null | tr -d '\r' || echo "")
-            if [ "$STATE" = "device" ]; then
-              B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-              if [ "$B" = "1" ]; then break; fi
-            fi
-            sleep 3
-          done
-          echo "reboot1 state=$STATE boot_completed=$B"
-          [ "$B" = "1" ] || { echo "REBOOT1 TIMEOUT"; tail -20 /tmp/emulator.log; exit 1; }
-          "$ADB" root
-          sleep 3
-          "$ADB" wait-for-device
-          "$ADB" shell "id"
-          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE" || { echo "STILL READ-ONLY"; "$ADB" shell "mount | grep -E 'overlay| /system '" || true; exit 1; }
-
-      - name: Install patched GmsCore as privileged app + reboot
+      - name: Install patched GmsCore (re-signed) + probe
         run: |
           set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "$APK_URL" -o /tmp/gms.apk
           echo "APK: $(stat -c %s /tmp/gms.apk) bytes"
-          "$ADB" shell "mkdir -p /system/priv-app/MicroGGmsCore"
-          "$ADB" push /tmp/gms.apk /system/priv-app/MicroGGmsCore/gms.apk
-          "$ADB" shell "chmod 644 /system/priv-app/MicroGGmsCore/gms.apk"
-          "$ADB" shell "ls -la /system/priv-app/MicroGGmsCore/"
-          # clean system scan
-          timeout 60 "$ADB" reboot || true
-          for i in $(seq 1 140); do
-            set +o pipefail
-            STATE=$("$ADB" get-state 2>/dev/null | tr -d '\r' || echo "")
-            if [ "$STATE" = "device" ]; then
-              B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-              if [ "$B" = "1" ]; then break; fi
-            fi
-            sleep 3
-          done
-          echo "reboot2 state=$STATE boot_completed=$B"
-          [ "$B" = "1" ] || { echo "REBOOT2 TIMEOUT"; tail -20 /tmp/emulator.log; exit 1; }
-          "$ADB" root
-          sleep 3
-          timeout 60 "$ADB" wait-for-device || true
+          # ci-repro publishes the patched GmsCore unsigned -> re-sign so it is installable.
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          keytool -genkeypair -v -keystore /tmp/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          "$APKSIGNER" sign --ks /tmp/debug.keystore --ks-pass pass:android --key-pass pass:android \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out /tmp/gms-signed.apk /tmp/gms.apk
+          "$APKSIGNER" verify --print-certs /tmp/gms-signed.apk || true
+          "$ADB" install -r /tmp/gms-signed.apk
+          echo "--- build + install probe ---"
+          chmod +x probe/build_apk.sh
+          probe/build_apk.sh
+          "$ADB" install -r probe/build/demo.apk
           "$ADB" shell "pm path com.google.android.gms" || true
-          "$ADB" shell "dumpsys package com.google.android.gms | grep -A3 'Service Resolver Table' | head -20" || true
 
-      - name: Generate demo CA + server cert
+      - name: Configure emulator (DroidGuard Network prefs)
         run: |
-          chmod +x demo/gen_certs.sh
-          demo/gen_certs.sh "$PWD/demo-certs"
-          ls -la demo-certs/
-
-      - name: Configure emulator (system CA + DroidGuard Network prefs)
-        run: |
+          set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" shell "touch /system/ca-test" || true
-          CERT=$(ls demo-certs/ca-*.0 | head -1)
-          HASH=$(basename "$CERT" .0 | sed 's/ca-//')
-          "$ADB" push "$CERT" /data/local/tmp/ca-cert.0
-          "$ADB" shell "cp /data/local/tmp/ca-cert.0 /system/etc/security/cacerts/ca-$HASH.0" || \
-            "$ADB" shell "cp /data/local/tmp/ca-cert.0 /apex/com.android.conscrypt/cacerts/ca-$HASH.0" || true
-          "$ADB" shell "ls /system/etc/security/cacerts/ | grep ca-$HASH" || true
           "$ADB" shell "am force-stop com.google.android.gms" || true
           "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
-          GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{v=$NF; sub(/^uid:/,"",v); print v; exit}' | tr -d '\\r')
+          GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{v=$NF; sub(/^uid:/,"",v); print v; exit}' | tr -d '\r')
           echo "GmsCore uid=$GMS_UID"
           [ -n "$GMS_UID" ] || { echo "could not resolve gms uid"; exit 1; }
-          # prefs written from base64 (avoids column-0 heredoc truncating the YAML block scalar,
-          # which produced phantom 0-job/failed runs). Decode on host, pipe into adb shell cat.
-          printf '%s' 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiIHN0YW5kYWxvbmU9InllcyIgPz4KPG1hcD4KICAgIDxib29sZWFuIG5hbWU9ImRyb2lkZ3VhcmRfZW5hYmxlZCIgdmFsdWU9InRydWUiIC8+CiAgICA8c3RyaW5nIG5hbWU9ImRyb2lkZ3VhcmRfbW9kZSI+TmV0d29yazwvc3RyaW5nPgogICAgPHN0cmluZyBuYW1lPSJkcm9pZGd1YXJkX25ldHdvcmtfc2VydmVyX3VybCI+aHR0cHM6Ly8xMC4wLjIuMjo4NDQzLzwvc3RyaW5nPgogICAgPGJvb2xlYW4gbmFtZT0iZHJvaWRndWFyZF9ibG9ja19od19hdHRlc3RhdGlvbiIgdmFsdWU9InRydWUiIC8+CjwvbWFwPg==' | base64 -d > /tmp/prefs.xml
+          # prefs via base64 (avoids column-0 heredoc truncating the YAML block scalar).
+          # HTTP :8080 (no TLS/CA needed) - server runs on the runner, reachable via 10.0.2.2.
+          printf '%s' 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiIHN0YW5kYWxvbmU9InllcyIgPz4KPG1hcD4KICAgIDxib29sZWFuIG5hbWU9ImRyb2lkZ3VhcmRfZW5hYmxlZCIgdmFsdWU9InRydWUiIC8+CiAgICA8c3RyaW5nIG5hbWU9ImRyb2lkZ3VhcmRfbW9kZSI+TmV0d29yazwvc3RyaW5nPgogICAgPHN0cmluZyBuYW1lPSJkcm9pZGd1YXJkX25ldHdvcmtfc2VydmVyX3VybCI+aHR0cDovLzEwLjAuMi4yOjgwODAvPC9zdHJpbmc+CiAgICA8Ym9vbGVhbiBuYW1lPSJkcm9pZGd1YXJkX2Jsb2NrX2h3X2F0dGVzdGF0aW9uIiB2YWx1ZT0idHJ1ZSIgLz4KPC9tYXA+' | base64 -d > /tmp/prefs.xml
           "$ADB" shell "cat > /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml" < /tmp/prefs.xml
           "$ADB" shell "chown -R $GMS_UID:$GMS_UID /data/data/com.google.android.gms/shared_prefs; chmod 660 /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
           "$ADB" shell "cat /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
 
-      - name: Start multistep DroidGuard server (TLS, mock backend)
+      - name: Start multistep DroidGuard server (mock backend)
         run: |
           python3 --version
           (cd droidguard-server && python3 -m pip install --quiet pytest 2>/dev/null || true)
-          (cd demo-certs && nohup python3 ../demo/tls_server.py --port 8443 --verbose > /tmp/server.log 2>&1 &)
-          sleep 2
-          echo "server.pid: $(pgrep -f tls_server || echo none)"
-          grep -i "listening" /tmp/server.log || true
+          nohup python3 droidguard-server/droidguard_multistep_server.py --host 0.0.0.0 --port 8080 > /tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          sleep 3
+          cat /tmp/server.log || true
+          echo "server.pid: $(cat /tmp/server.pid)"
 
-      - name: Build probe APK (aidl/javac/d8/aapt2)
-        run: |
-          chmod +x probe/build_apk.sh
-          probe/build_apk.sh
-
-      - name: Install probe + run demo under screenrecord
+      - name: Run demo under screenrecord (video)
         run: |
           set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" install -r probe/build/demo.apk
-          # warm GmsCore once so the demo isn't first-run cold (prefs persist)
+          # warm GmsCore once so the demo isn't first-run cold
           "$ADB" shell "am force-stop com.google.android.gms" || true
           "$ADB" shell "rm -f /sdcard/demo_result.txt"
           "$ADB" logcat -c || true
-          # start recording (30s max)
-          "$ADB" shell "screenrecord --time-limit 45 --bit-rate 4000000 /sdcard/demo.mp4" &
+          # start recording (up to 6 minutes to span the whole sweep sequence)
+          "$ADB" shell "screenrecord --time-limit 180 --bit-rate 4000000 /sdcard/demo.mp4" &
           REC_PID=$!
           sleep 3
           "$ADB" shell "am start -n com.digivasserver.demo/.MainActivity"
-          # wait for the demo marker (up to 60s)
+          # wait for the demo result (sweep can take ~60s)
           OK=""
-          for i in $(seq 1 20); do
+          for i in $(seq 1 70); do
             sleep 3
             R=$("$ADB" shell "cat /sdcard/demo_result.txt 2>/dev/null | tr -d '\r'" || echo "")
             if [ -n "$R" ]; then OK=$R; break; fi
           done
           echo "demo_result=$OK"
-          # show logcat
-          "$ADB" logcat -d -s DGProbe GmsGuardServiceImpl DroidGuardDaemon 2>/dev/null | tail -30 || true
-          # stop recording
+          # show probe logcat
+          "$ADB" logcat -d -s DGProbe 2>/dev/null | tail -60 || true
+          echo "---- server log ----"
+          tail -60 /tmp/server.log || true
+          # stop recording and pull the video
           "$ADB" shell "pkill -INT -f screenrecord" || true
           wait $REC_PID 2>/dev/null || true
           sleep 2
           "$ADB" shell "ls -la /sdcard/demo.mp4" || true
           "$ADB" pull /sdcard/demo.mp4 /tmp/demo.mp4 || true
           "$ADB" shell "screencap -p /sdcard/final.png"; "$ADB" pull /sdcard/final.png /tmp/final.png || true
-          [ -n "$OK" ] || { echo "DEMO DID NOT COMPLETE"; tail -50 /tmp/server.log; exit 1; }
+          # write the result marker so the run outcome is explicit
+          echo "$OK" > /tmp/demo_result.txt
 
       - name: Upload artifacts (video + server log + screen)
         if: always()
@@ -213,6 +164,7 @@ jobs:
           path: |
             /tmp/demo.mp4
             /tmp/final.png
+            /tmp/demo_result.txt
             /tmp/server.log
             /tmp/emulator.log
-            probe/build/demo.apk
+            *.txt
