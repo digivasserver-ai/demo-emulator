@@ -75,17 +75,19 @@ jobs:
           "$ADB" wait-for-device
           "$ADB" shell id
           # adb remount disables verity + arms overlayfs; a reboot applies it
-          "$ADB" remount
-          "$ADB" reboot
-          "$ADB" wait-for-device
-          for i in $(seq 1 120); do
+          "$ADB" remount || true
+          timeout 60 "$ADB" reboot || true
+          for i in $(seq 1 140); do
             set +o pipefail
-            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            set -o pipefail
-            [ "$B" = "1" ] && break
+            STATE=$("$ADB" get-state 2>/dev/null | tr -d '\r' || echo "")
+            if [ "$STATE" = "device" ]; then
+              B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+              if [ "$B" = "1" ]; then break; fi
+            fi
             sleep 3
           done
-          echo "reboot1 boot_completed=$B"
+          echo "reboot1 state=$STATE boot_completed=$B"
+          [ "$B" = "1" ] || { echo "REBOOT1 TIMEOUT"; "$ADB" shell "getprop | grep -E 'boot|build'" || true; tail -20 /tmp/emulator.log; exit 1; }
           "$ADB" root
           sleep 3
           "$ADB" wait-for-device
@@ -103,16 +105,18 @@ jobs:
           "$ADB" shell "chmod 644 /system/priv-app/MicroGGmsCore/gms.apk"
           "$ADB" shell "ls -la /system/priv-app/MicroGGmsCore/"
           # clean system scan of the privileged app
-          "$ADB" reboot
-          "$ADB" wait-for-device
-          for i in $(seq 1 120); do
+          timeout 60 "$ADB" reboot || true
+          for i in $(seq 1 140); do
             set +o pipefail
-            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            set -o pipefail
-            [ "$B" = "1" ] && break
+            STATE=$("$ADB" get-state 2>/dev/null | tr -d '\r' || echo "")
+            if [ "$STATE" = "device" ]; then
+              B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+              if [ "$B" = "1" ]; then break; fi
+            fi
             sleep 3
           done
-          echo "reboot2 boot_completed=$B"
+          echo "reboot2 state=$STATE boot_completed=$B"
+          [ "$B" = "1" ] || { echo "REBOOT2 TIMEOUT"; tail -20 /tmp/emulator.log; exit 1; }
           "$ADB" root
           sleep 3
           "$ADB" wait-for-device
