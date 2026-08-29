@@ -167,24 +167,40 @@ public class MainActivity extends Activity {
     }
 
     private void writeMarker(final String path, final String content, Handler h) {
-        new Thread(() -> {
-            try {
-                java.io.File f = new java.io.File(path);
-                java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
-                fos.write((content + "\n").getBytes(StandardCharsets.UTF_8));
-                fos.close();
-                h.post(() -> log("wrote " + path));
-            } catch (Exception e) {
-                h.post(() -> log("marker write failed: " + e));
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    java.io.File f = new java.io.File(path);
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+                    fos.write((content + "\n").getBytes(StandardCharsets.UTF_8));
+                    fos.close();
+                    h.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            log("wrote " + path);
+                        }
+                    });
+                } catch (Exception e) {
+                    h.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            log("marker write failed: " + e);
+                        }
+                    });
+                }
             }
         }).start();
     }
 
     private void log(final String line) {
         android.util.Log.i(TAG, line);
-        ui.post(() -> {
-            logBuf.append(line).append("\n");
-            logView.setText(logBuf.toString());
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                logBuf.append(line).append("\n");
+                logView.setText(logBuf.toString());
+            }
         });
     }
 
