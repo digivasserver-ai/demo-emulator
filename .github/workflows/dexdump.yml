@@ -1,0 +1,31 @@
+name: Dexdump Stub
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download GMS APK
+        run: |
+          curl -sSL "https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000.apk" -o /tmp/gms.apk
+          ls -la /tmp/gms.apk
+          sha256sum /tmp/gms.apk
+      - name: Install SDK build-tools
+        run: |
+          export ANDROID_HOME=/opt/android-sdk
+          mkdir -p "$ANDROID_HOME/cmdline-tools/latest/bin"
+          curl -sSL -o /tmp/cmdline.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          unzip -q -o /tmp/cmdline.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;35.0.0" >/dev/null 2>&1
+      - name: Dexdump IGmsServiceBroker\$Stub
+        run: |
+          cd /tmp && mkdir -p x && cd x
+          unzip -o -q /tmp/gms.apk "classes*.dex"
+          ls -la classes*.dex
+          for d in classes*.dex; do
+            echo "===== $d ====="
+            /opt/android-sdk/build-tools/35.0.0/dexdump -d "$d" 2>/dev/null | awk '/Class descriptor.*IGmsServiceBroker\$Stub/{f=1} f{print} f&&/^$/&&seen{exit} f{seen=1}' | grep -E "TRANSACTION|invoke|const|onTransact|method" | head -80
+          done
