@@ -1,0 +1,99 @@
+name: "Emulator boot dry-run"
+
+# Phase 1 feasibility probe: can we boot a headless Android emulator on a
+# GitHub-hosted runner (no /dev/kvm) in acceptable time, and is the image
+# rootable/remountable for privileged microG install later?
+#
+# Expected outputs (uploaded as artifacts):
+#   - boot-time.txt   (time to sys.boot_completed)
+#   - sysinfo.txt     (boot_completed, ro.debuggable, adb root result)
+#   - screenshot.png  (post-boot screencap)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  boot:
+    name: boot aosp_atd api30
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /opt/android-sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5.7.0
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Check KVM availability
+        run: |
+          if [ -e /dev/kvm ]; then echo "kvm: yes"; else echo "kvm: no"; fi
+
+      - name: Install SDK + emulator + system image
+        run: |
+          set -euxo pipefail
+          sudo mkdir -p "$ANDROID_HOME" && sudo chown -R "$USER": "$ANDROID_HOME"
+          curl -sS https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline.zip
+          unzip -q /tmp/cmdline.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platform-tools" "emulator" \
+            "platforms;android-30" \
+            "system-images;android-30;aosp_atd;x86_64" > /dev/null
+
+      - name: Create AVD
+        run: |
+          echo "no" | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+            -n test -k "system-images;android-30;aosp_atd;x86_64" --force
+
+      - name: Boot emulator (software accel, headless)
+        run: |
+          set -euxo pipefail
+          "$ANDROID_HOME/platform-tools/adb" start-server
+          nohup "$ANDROID_HOME/emulator/emulator" \
+            -avd test \
+            -no-window -no-audio -no-boot-anim \
+            -accel off -gpu swiftshader_indirect \
+            -no-snapshot -no-metrics \
+            -memory 2048 -cores 2 \
+            > /tmp/emulator.log 2>&1 &
+          START=$SECONDS
+          # wait up to 900s for boot
+          for i in $(seq 1 180); do
+            BOOT=$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if [ "$BOOT" = "1" ]; then break; fi
+            sleep 5
+          done
+          echo "boot_seconds=$((SECONDS - START))" | tee boot-time.txt
+          if [ "$BOOT" != "1" ]; then echo "BOOT TIMEOUT"; tail -20 /tmp/emulator.log; exit 1; fi
+
+      - name: Post-boot diagnostics
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          {
+            echo "boot_completed=$($ADB shell getprop sys.boot_completed | tr -d '\r')"
+            echo "ro.debuggable=$($ADB shell getprop ro.debuggable | tr -d '\r')"
+            echo "ro.build.version.sdk=$($ADB shell getprop ro.build.version.sdk | tr -d '\r')"
+            echo "ro.product.model=$($ADB shell getprop ro.product.model | tr -d '\r')"
+            echo "adb_root_pre=$($ADB shell 'su -c id' 2>/dev/null | tr -d '\r' || echo 'su unavailable')"
+            $ADB root > /dev/null 2>&1 || true
+            sleep 2
+            echo "adb_root_post=$(id 2>/dev/null || true)"
+            echo "id_after=$($ADB shell id 2>/dev/null | tr -d '\r')"
+          } | tee sysinfo.txt
+          "$ADB" exec-out screencap -p > screenshot.png
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-dryrun
+          path: |
+            boot-time.txt
+            sysinfo.txt
+            screenshot.png
+            /tmp/emulator.log
