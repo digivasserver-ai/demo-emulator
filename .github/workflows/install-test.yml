@@ -74,8 +74,8 @@ jobs:
           sleep 3
           "$ADB" wait-for-device
           "$ADB" shell id
-          "$ADB" remount || true
-          "$ADB" shell "mount -o rw,remount /system" || true
+          "$ADB" remount
+          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE"
           "$ADB" shell "ls /system/priv-app/ | head"
 
       - name: Install GmsCore as privileged app
