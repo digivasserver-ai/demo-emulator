@@ -1,4 +1,4 @@
-name: probe-install2
+name: probe-install2b
 on: workflow_dispatch
   workflow_dispatch:
 
