@@ -75,7 +75,7 @@ jobs:
           "$ADB" wait-for-device
           "$ADB" shell id
           # adb remount disables verity + arms overlayfs; a reboot applies it
-          "$ADB" remount || true
+          timeout 60 "$ADB" remount || true
           timeout 60 "$ADB" reboot || true
           for i in $(seq 1 140); do
             set +o pipefail
