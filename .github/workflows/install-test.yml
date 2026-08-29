@@ -71,33 +71,14 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000.apk" -o /tmp/gms.apk || { echo "APK download failed"; exit 1; }
           ls -la /tmp/gms.apk
-echo "===== dexdump IGmsServiceBroker stub ====="
+          echo "===== dexdump IGmsServiceBroker stub ====="
           cd /tmp && rm -rf dex-x && mkdir dex-x && cd dex-x
           unzip -o -q /tmp/gms.apk "classes*.dex"
           for d in classes*.dex; do
             "$ANDROID_HOME/build-tools/34.0.0/dexdump" -d "$d" > dd.txt 2>/dev/null || true
             if grep -q "IGmsServiceBroker" dd.txt; then
               echo "=== $d ==="
-              python3 - <<'PY'
-import re
-hdr=None; body=[]; cur=None
-want="com.google.android.gms.common.internal.IGmsServiceBroker"
-lines=open("dd.txt",encoding="utf-8",errors="replace").read().splitlines()
-i=0
-out=[]
-while i < len(lines):
-    ln=lines[i]
-    if re.match(r'^  Class descriptor', ln):
-        cur=[ln]; i+=1
-        while i < len(lines) and not re.match(r'^  Class descriptor', lines[i]):
-            cur.append(lines[i]); i+=1
-        blob="\n".join(cur)
-        if want in blob:
-            out.append(blob[-4000:])
-    else:
-        i+=1
-print("\n---CLASS---\n".join(out[:2]) if out else "NO CLASS FOUND")
-PY
+              python3 "$GITHUB_WORKSPACE/dexdump_stub.py" || true
             fi
           done
           rm -rf /tmp/dex-x || true
