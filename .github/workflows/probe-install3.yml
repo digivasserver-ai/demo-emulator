@@ -4,7 +4,10 @@ on: workflow_dispatch
 env:
   ANDROID_HOME: /opt/android-sdk
   ANDROID_AVD_HOME: /opt/avd
-  APK_URL: https://github.com/digivasserver-ai/ci-repro/releases/download/apks-latest/microg-services.apk
+  # NOTE: 'apks-latest/microg-services.apk' no longer exists on ci-repro (returns
+  # a 9-byte "Not Found" body -> INSTALL_PARSE_FAILED_NOT_APK). Point at the real
+  # patched GmsCore asset, sha256-verified against the cached local APK.
+  APK_URL: https://github.com/digivasserver-ai/ci-repro/releases/download/apks-97b0877/com.google.android.gms-252432000-hw.apk
 
 jobs:
   install-test:
