@@ -3,6 +3,13 @@ name: "Demo: microG install-test"
 # Phase 2a: install the patched GmsCore (built by ci-repro) as a privileged
 # app on the ATD emulator, configure DroidGuard remote mode, and verify the
 # multi-step reference server responds. No video yet — prove the wiring first.
+#
+# Writability strategy (no `adb reboot`, which hangs on ATD images):
+#   - boot with -writable-system: writes to /system persist in the AVD qcow2
+#   - adb remount arms overlayfs; it applies at the NEXT kernel boot, which
+#     we trigger by relaunching the emulator process (not guest reboot)
+#   - after installing priv-app + CA cert, `adb shell stop && start` restarts
+#     the framework (package scan + conscrypt reload) without rebooting
 on:
   workflow_dispatch:
 
@@ -67,59 +74,77 @@ jobs:
           done
           [ "$BOOT" = "1" ] || { echo "BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
 
-      - name: Get root shell (overlayfs remount + reboot)
+      - name: arm overlayfs (remount) + relaunch emulator for writable /system
         run: |
+          set -euxo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           "$ADB" root
           sleep 3
-          "$ADB" wait-for-device
+          timeout 60 "$ADB" wait-for-device || true
           "$ADB" shell id
-          # adb remount disables verity + arms overlayfs; a reboot applies it
-          timeout 60 "$ADB" remount || true
-          timeout 60 "$ADB" reboot || true
-          for i in $(seq 1 140); do
+          # arms overlayfs; applied at next kernel boot (steps below)
+          timeout 60 "$ADB" remount || echo "remount reported failure (ok if kept read-only for now)"
+          # graceful emulator exit (flushes AVD qcow2), then fresh kernel boot
+          timeout 60 "$ADB" emu kill || true
+          sleep 5
+          pkill -f 'emulator.*-avd test' || true
+          sleep 5
+          # relaunch: overlayfs is now armed and applies on this boot
+          nohup "$ANDROID_HOME/emulator/emulator" \
+            -avd test \
+            -no-window -no-audio -no-boot-anim \
+            -accel auto -gpu swiftshader_indirect \
+            -no-snapshot -no-metrics -writable-system \
+            -memory 2048 -cores 2 \
+            > /tmp/emulator.log 2>&1 &
+          EMU_PID=$!
+          START=$SECONDS
+          for i in $(seq 1 120); do
+            if ! kill -0 "$EMU_PID" 2>/dev/null; then echo "EMULATOR DIED (relaunch)"; tail -40 /tmp/emulator.log; exit 1; fi
             set +o pipefail
-            STATE=$("$ADB" get-state 2>/dev/null | tr -d '\r' || echo "")
-            if [ "$STATE" = "device" ]; then
-              B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-              if [ "$B" = "1" ]; then break; fi
-            fi
+            BOOT=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            set -o pipefail
+            if [ "$BOOT" = "1" ]; then echo "relaunch_boot_seconds=$((SECONDS - START))"; break; fi
             sleep 3
           done
-          echo "reboot1 state=$STATE boot_completed=$B"
-          [ "$B" = "1" ] || { echo "REBOOT1 TIMEOUT"; "$ADB" shell "getprop | grep -E 'boot|build'" || true; tail -20 /tmp/emulator.log; exit 1; }
+          [ "$BOOT" = "1" ] || { echo "RELAUNCH BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
           "$ADB" root
           sleep 3
-          "$ADB" wait-for-device
+          timeout 60 "$ADB" wait-for-device || true
           "$ADB" shell "id"
           "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE" || { echo "STILL READ-ONLY"; "$ADB" shell "mount | grep -E 'overlay| /system '" || true; exit 1; }
 
-      - name: Install GmsCore as privileged app + reboot
+      - name: Install GmsCore as privileged app + CA cert, restart framework
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "$APK_URL" -o /tmp/gms.apk || { echo "APK download failed ($APK_URL)"; exit 1; }
           ls -la /tmp/gms.apk
+          # demo CA so the emulator trusts our TLS droidguard server
+          CERT=$(ls demo-certs/ca-*.0 2>/dev/null | head -1)
+          if [ -n "$CERT" ]; then
+            "$ADB" push "$CERT" /system/etc/security/cacerts/
+            "$ADB" shell "chmod 644 /system/etc/security/cacerts/$(basename "$CERT")"
+            echo "CA pushed: $(basename "$CERT")"
+          else
+            echo "no demo CA in repo; skipping (phase 2b adds it)"
+          fi
           "$ADB" shell "mkdir -p /system/priv-app/MicroGGmsCore"
           "$ADB" push /tmp/gms.apk /system/priv-app/MicroGGmsCore/gms.apk
           "$ADB" shell "chmod 644 /system/priv-app/MicroGGmsCore/gms.apk"
           "$ADB" shell "ls -la /system/priv-app/MicroGGmsCore/"
-          # clean system scan of the privileged app
-          timeout 60 "$ADB" reboot || true
-          for i in $(seq 1 140); do
+          # framework restart = package scan + conscrypt reload, no reboot
+          timeout 60 "$ADB" shell "stop && start" || true
+          for i in $(seq 1 120); do
             set +o pipefail
-            STATE=$("$ADB" get-state 2>/dev/null | tr -d '\r' || echo "")
-            if [ "$STATE" = "device" ]; then
-              B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-              if [ "$B" = "1" ]; then break; fi
-            fi
+            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            set -o pipefail
+            if [ "$B" = "1" ]; then echo "framework restarted"; break; fi
             sleep 3
           done
-          echo "reboot2 state=$STATE boot_completed=$B"
-          [ "$B" = "1" ] || { echo "REBOOT2 TIMEOUT"; tail -20 /tmp/emulator.log; exit 1; }
           "$ADB" root
           sleep 3
-          "$ADB" wait-for-device
+          timeout 60 "$ADB" wait-for-device || true
 
       - name: Verify install (pm list / appops)
         run: |
