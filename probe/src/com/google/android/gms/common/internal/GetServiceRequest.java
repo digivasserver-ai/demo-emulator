@@ -21,6 +21,34 @@ public class GetServiceRequest implements Parcelable {
         this.extras = new Bundle();
     }
 
+    /**
+     * Tolerant parser used only on the (never-exercised) in-process stub path:
+     * reads field 2 (serviceId) from the safeparcel stream if present.
+     */
+    public GetServiceRequest(Parcel in) {
+        this(0);
+        try {
+            int start = in.dataPosition();
+            int header = in.readInt();
+            int field = header & 0xFFFF;
+            int size = header >>> 16;
+            if (field == 1) {
+                in.readInt();
+                header = in.readInt();
+                field = header & 0xFFFF;
+                size = header >>> 16;
+            }
+            if (field == 2 && size == 4) {
+                this.serviceId = in.readInt();
+            } else if (field == 2) {
+                in.setDataPosition(in.dataPosition() + size);
+            } else {
+                in.setDataPosition(start);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     @Override
     public int describeContents() {
         return 0;
@@ -41,9 +69,9 @@ public class GetServiceRequest implements Parcelable {
         writeStringField(dest, 4, packageName);
         // field 7: extras
         writeBundleField(dest, 7, extras);
-        // field 12: supportsConnectionInfo
+        // field 12: supportsConnectionInfo (0 => callback uses basic onPostInitComplete)
         writeHeader(dest, 12, 4);
-        dest.writeInt(1);
+        dest.writeInt(0);
     }
 
     private static void writeHeader(Parcel parcel, int fieldId, int size) {

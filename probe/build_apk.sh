@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the DroidGuard probe APK without Gradle/AGP:
-# aidl -> javac -> d8 -> aapt2 link -> zipalign -> apksigner
+# javac -> d8 -> aapt2 link -> zipalign -> apksigner
+# (AIDL stubs are hand-written under src/, so no aidl step is needed.)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -9,7 +10,6 @@ BT_VERSION="${BT_VERSION:-34.0.0}"
 BT="$ANDROID_HOME/build-tools/$BT_VERSION"
 PLATFORM="$ANDROID_HOME/platforms/android-30/android.jar"
 
-AIDL="$BT/aidl"
 AAPT2="$BT/aapt2"
 D8="$BT/d8"
 ZIPALIGN="$BT/zipalign"
@@ -20,24 +20,15 @@ echo "ROOT=$ROOT"
 ls "$PLATFORM" >/dev/null
 
 BUILD="$ROOT/build"
-rm -rf "$BUILD" && mkdir -p "$BUILD/gen" "$BUILD/cls" "$BUILD/dexout"
+rm -rf "$BUILD" && mkdir -p "$BUILD/cls" "$BUILD/dexout"
 
-# 1) AIDL -> Java stubs
-while IFS= read -r f; do
-  rel="${f#"$ROOT/aidl/"}"
-  echo "aidl: $rel"
-  "$AIDL" -p"$PLATFORM" -I"$ROOT/aidl" -o"$BUILD/gen" "$f"
-done < <(find "$ROOT/aidl" -name '*.aidl' | sort)
-
-echo "generated: $(find "$BUILD/gen" -name '*.java' | wc -l) java files"
-
-# 2) javac (Android API 30 bootclasspath)
-find "$BUILD/gen" "$ROOT/src" -name '*.java' > "$BUILD/sources.txt"
-javac -source 11 -target 11 -bootclasspath "$PLATFORM" -classpath "$BUILD/gen" \
+# 1) javac (Android API 30 bootclasspath)
+find "$ROOT/src" -name '*.java' > "$BUILD/sources.txt"
+javac -source 11 -target 11 -bootclasspath "$PLATFORM" \
   -d "$BUILD/cls" @"$BUILD/sources.txt"
 echo "classes: $(find "$BUILD/cls" -name '*.class' | wc -l)"
 
-# 3) d8 -> dex
+# 2) d8 -> dex
 "$D8" --lib "$PLATFORM" --min-api 30 --output "$BUILD/dexout" \
   $(find "$BUILD/cls" -name '*.class' | sort)
 ls -la "$BUILD/dexout/classes.dex"
