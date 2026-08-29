@@ -85,7 +85,8 @@ jobs:
           echo "GMS_UID=$GMS_UID"
           [ -n "$GMS_UID" ] || { echo "could not resolve gms uid"; exit 1; }
           "$ADB" shell "rm -rf /data/data/com.google.android.gms/shared_prefs"
-          "$ADB" push prefs/com.google.android.gms_preferences.xml /data/data/com.google.android.gms/shared_prefs/
+          "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs"
+          "$ADB" shell "cat > /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml" < prefs/com.google.android.gms_preferences.xml
           "$ADB" shell "chown -R $GMS_UID:$GMS_UID /data/data/com.google.android.gms/shared_prefs"
           "$ADB" shell "chmod 660 /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
           "$ADB" shell "cat /data/data/com.google.android.gms/shared_prefs/com.google.android.gms_preferences.xml"
