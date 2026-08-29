@@ -67,19 +67,34 @@ jobs:
           done
           [ "$BOOT" = "1" ] || { echo "BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
 
-      - name: Get root shell
+      - name: Get root shell (overlayfs remount + reboot)
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
           "$ADB" root
           sleep 3
           "$ADB" wait-for-device
           "$ADB" shell id
+          # adb remount disables verity + arms overlayfs; a reboot applies it
           "$ADB" remount
-          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE"
-          "$ADB" shell "ls /system/priv-app/ | head"
+          "$ADB" reboot
+          "$ADB" wait-for-device
+          for i in $(seq 1 120); do
+            set +o pipefail
+            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            set -o pipefail
+            [ "$B" = "1" ] && break
+            sleep 3
+          done
+          echo "reboot1 boot_completed=$B"
+          "$ADB" root
+          sleep 3
+          "$ADB" wait-for-device
+          "$ADB" shell "id"
+          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE" || { echo "STILL READ-ONLY"; "$ADB" shell "mount | grep -E 'overlay| /system '" || true; exit 1; }
 
-      - name: Install GmsCore as privileged app
+      - name: Install GmsCore as privileged app + reboot
         run: |
+          set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           curl -sSL "$APK_URL" -o /tmp/gms.apk || { echo "APK download failed ($APK_URL)"; exit 1; }
           ls -la /tmp/gms.apk
@@ -87,12 +102,27 @@ jobs:
           "$ADB" push /tmp/gms.apk /system/priv-app/MicroGGmsCore/gms.apk
           "$ADB" shell "chmod 644 /system/priv-app/MicroGGmsCore/gms.apk"
           "$ADB" shell "ls -la /system/priv-app/MicroGGmsCore/"
+          # clean system scan of the privileged app
+          "$ADB" reboot
+          "$ADB" wait-for-device
+          for i in $(seq 1 120); do
+            set +o pipefail
+            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            set -o pipefail
+            [ "$B" = "1" ] && break
+            sleep 3
+          done
+          echo "reboot2 boot_completed=$B"
+          "$ADB" root
+          sleep 3
+          "$ADB" wait-for-device
 
       - name: Verify install (pm list / appops)
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
           "$ADB" shell "pm list packages | grep -i gms" || true
           "$ADB" shell "pm path com.google.android.gms" || true
+          "$ADB" shell "dumpsys package com.google.android.gms | grep -E 'userId=|versionName|enabled=' | head -5" || true
 
       - name: Install patched droidguard server (python) on runner
         run: |

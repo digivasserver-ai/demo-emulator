@@ -74,15 +74,30 @@ jobs:
           done
           [ "$BOOT" = "1" ] || { echo "BOOT TIMEOUT"; tail -40 /tmp/emulator.log; exit 1; }
 
-      - name: Get root shell
+      - name: Get root shell (overlayfs remount + reboot)
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
           "$ADB" root
           sleep 3
           "$ADB" wait-for-device
           "$ADB" shell id
+          # adb remount disables verity + arms overlayfs; a reboot applies it
           "$ADB" remount
-          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE"
+          "$ADB" reboot
+          "$ADB" wait-for-device
+          for i in $(seq 1 120); do
+            set +o pipefail
+            B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            set -o pipefail
+            [ "$B" = "1" ] && break
+            sleep 3
+          done
+          echo "reboot1 boot_completed=$B"
+          "$ADB" root
+          sleep 3
+          "$ADB" wait-for-device
+          "$ADB" shell "id"
+          "$ADB" shell "touch /system/remount-test" && echo "SYSTEM WRITABLE" || { echo "STILL READ-ONLY"; "$ADB" shell "mount | grep -E 'overlay| /system '" || true; exit 1; }
 
       - name: Install patched GmsCore as privileged app + reboot
         run: |
@@ -120,8 +135,7 @@ jobs:
       - name: Configure emulator (system CA + DroidGuard Network prefs)
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" shell "mount -o rw,remount /" || true
-          "$ADB" shell "mount -o rw,remount /system" || true
+          "$ADB" shell "touch /system/ca-test" || true
           CERT=$(ls demo-certs/ca-*.0 | head -1)
           HASH=$(basename "$CERT" .0 | sed 's/ca-//')
           "$ADB" push "$CERT" /data/local/tmp/ca-cert.0
