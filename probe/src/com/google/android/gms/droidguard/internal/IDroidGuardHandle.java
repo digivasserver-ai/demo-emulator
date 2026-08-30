@@ -9,11 +9,13 @@ import java.util.Map;
 
 /**
  * Hand-written AIDL stub/proxy pair for IDroidGuardHandle.
- * Transaction codes (server-side Stub dispatch, byte-confirmed from the
- * installed microG build's IDroidGuardHandle$Stub.onTransact):
- * initWithRequest=1, close=2, snapshot=3, init=5.
- * The server routes close (2) and init (5) without writing a reply, so the
- * proxy fires them oneway; snapshot (3) replies with a noException + byte[].
+ * Transaction codes (byte-confirmed from the installed microG build's
+ * client proxy IDroidGuardHandle$Stub$Proxy):
+ * init=1, snapshot=2 (reply byte[]), close=3, initWithRequest=5 (reply
+ * DroidGuardInitReply). The server fires init (1) and close (3) without a
+ * reply, so the proxy sends them oneway. snapshot/initWithRequest are
+ * two-way. Parcelable args are framed microG-style: writeInt(1) present flag
+ * before writeToParcel; readTypedObject consumes it before CREATOR.
  */
 public interface IDroidGuardHandle extends IInterface {
 
@@ -55,6 +57,25 @@ public interface IDroidGuardHandle extends IInterface {
                 case 1: {
                     data.enforceInterface(DESCRIPTOR);
                     String flow = data.readString();
+                    init(flow);
+                    return true;
+                }
+                case 2: {
+                    data.enforceInterface(DESCRIPTOR);
+                    Map map = data.readHashMap(getClass().getClassLoader());
+                    byte[] result = snapshot(map);
+                    reply.writeNoException();
+                    reply.writeByteArray(result);
+                    return true;
+                }
+                case 3: {
+                    data.enforceInterface(DESCRIPTOR);
+                    close();
+                    return true;
+                }
+                case 5: {
+                    data.enforceInterface(DESCRIPTOR);
+                    String flow = data.readString();
                     DroidGuardResultsRequest request = DroidGuardResultsRequest.CREATOR.createFromParcel(data);
                     DroidGuardInitReply result = initWithRequest(flow, request);
                     reply.writeNoException();
@@ -63,25 +84,6 @@ public interface IDroidGuardHandle extends IInterface {
                     } else {
                         reply.writeInt(0);
                     }
-                    return true;
-                }
-                case 2: {
-                    data.enforceInterface(DESCRIPTOR);
-                    close();
-                    return true;
-                }
-                case 3: {
-                    data.enforceInterface(DESCRIPTOR);
-                    Map map = data.readHashMap(getClass().getClassLoader());
-                    byte[] result = snapshot(map);
-                    reply.writeNoException();
-                    reply.writeByteArray(result);
-                    return true;
-                }
-                case 5: {
-                    data.enforceInterface(DESCRIPTOR);
-                    String flow = data.readString();
-                    init(flow);
                     return true;
                 }
             }
@@ -107,7 +109,7 @@ public interface IDroidGuardHandle extends IInterface {
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
                 data.writeString(flow);
-                mRemote.transact(5, data, null, android.os.IBinder.FLAG_ONEWAY);
+                mRemote.transact(1, data, null, android.os.IBinder.FLAG_ONEWAY);
             } finally {
                 data.recycle();
             }
@@ -121,7 +123,7 @@ public interface IDroidGuardHandle extends IInterface {
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
                 data.writeMap(map);
-                mRemote.transact(3, data, reply, 0);
+                mRemote.transact(2, data, reply, 0);
                 reply.readException();
                 return reply.createByteArray();
             } finally {
@@ -135,7 +137,7 @@ public interface IDroidGuardHandle extends IInterface {
             Parcel data = Parcel.obtain();
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
-                mRemote.transact(2, data, null, android.os.IBinder.FLAG_ONEWAY);
+                mRemote.transact(3, data, null, android.os.IBinder.FLAG_ONEWAY);
             } finally {
                 data.recycle();
             }
@@ -150,8 +152,9 @@ public interface IDroidGuardHandle extends IInterface {
                 data.writeString(flow);
                 data.writeInt(1);
                 request.writeToParcel(data, 0);
-                mRemote.transact(1, data, reply, 0);
+                mRemote.transact(5, data, reply, 0);
                 reply.readException();
+                reply.readInt(); // readTypedObject present-flag (1 when non-null)
                 return DroidGuardInitReply.CREATOR.createFromParcel(reply);
             } finally {
                 reply.recycle();

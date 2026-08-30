@@ -7,9 +7,9 @@ import android.os.RemoteException;
 
 /**
  * Hand-written AIDL stub/proxy pair for IDroidGuardService.
- * Transaction codes (server-side Stub dispatch, byte-confirmed from the
- * installed microG build's IDroidGuardService$Stub.onTransact):
- * guard=1, getClientTimeoutMillis=2, getHandle=3, guardWithRequest=4.
+ * Transaction codes (byte-confirmed from the installed microG build's
+ * client proxy IDroidGuardService$Stub$Proxy):
+ * guard=1, getHandle=2, getClientTimeoutMillis=3, guardWithRequest=4.
  */
 public interface IDroidGuardService extends IInterface {
 
@@ -41,7 +41,7 @@ public interface IDroidGuardService extends IInterface {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             switch (code) {
-                case 3: {
+                case 2: {
                     data.enforceInterface(DESCRIPTOR);
                     IDroidGuardHandle result = getHandle();
                     reply.writeNoException();
@@ -71,7 +71,7 @@ public interface IDroidGuardService extends IInterface {
             Parcel reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
-                mRemote.transact(3, data, reply, 0);
+                mRemote.transact(2, data, reply, 0);
                 reply.readException();
                 return IDroidGuardHandle.Stub.asInterface(reply.readStrongBinder());
             } finally {
