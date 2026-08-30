@@ -264,7 +264,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static final String MARKER_PATH = "/data/local/tmp/demo_result.txt";
+    // Use the app's own internal files dir — always writable by the app process.
+    // Resolves to /data/data/com.digivasserver.demo/files/demo_result.txt
+    private String getMarkerPath() {
+        return new java.io.File(getFilesDir(), "demo_result.txt").getAbsolutePath();
+    }
 
     private void runDroidGuardDemo(final IDroidGuardService svc) {
         // Run on a background thread so we can pace the steps with sleeps while the UI
@@ -359,7 +363,7 @@ public class MainActivity extends Activity {
         });
         // Hold the success screen so the recording clearly captures the final state.
         step(4500);
-        writeMarker(MARKER_PATH, marker, ui);
+                writeMarker(getMarkerPath(), marker, ui);
         try {
             unbindService(connection);
         } catch (Exception ignored) {

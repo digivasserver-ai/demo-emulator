@@ -119,11 +119,11 @@ jobs:
         run: |
           set -euo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" shell "rm -f /data/data/com.digivasserver.demo/demo_result.txt" || true
+          "$ADB" shell "rm -f /data/data/com.digivasserver.demo/files/demo_result.txt" || true
           "$ADB" shell "am start -n com.digivasserver.demo/.MainActivity"
           OK=""
           for i in $(seq 1 60); do
-            R=$("$ADB" shell "cat /data/data/com.digivasserver.demo/demo_result.txt 2>/dev/null | tr -d '\r'" || echo "")
+            R=$("$ADB" shell "cat /data/data/com.digivasserver.demo/files/demo_result.txt 2>/dev/null | tr -d '\r'" || echo "")
             if [ -n "$R" ]; then echo "demo marker: $R"; OK=1; break; fi
             sleep 2
           done
