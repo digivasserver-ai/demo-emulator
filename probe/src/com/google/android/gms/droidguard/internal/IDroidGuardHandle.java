@@ -1,21 +1,25 @@
 package com.google.android.gms.droidguard.internal;
 
-import android.os.Bundle;
 import android.os.IBinder;
 import android.os.IInterface;
 import android.os.Parcel;
 import android.os.RemoteException;
 
+import java.util.Map;
+
 /**
  * Hand-written AIDL stub/proxy pair for IDroidGuardHandle.
- * Transaction codes: init=0 (oneway), snapshot=1, close=2 (oneway),
- * initWithRequest=4 (declaration order).
+ * Transaction codes (server-side Stub dispatch, byte-confirmed from the
+ * installed microG build's IDroidGuardHandle$Stub.onTransact):
+ * initWithRequest=1, close=2, snapshot=3, init=5.
+ * The server routes close (2) and init (5) without writing a reply, so the
+ * proxy fires them oneway; snapshot (3) replies with a noException + byte[].
  */
 public interface IDroidGuardHandle extends IInterface {
 
     void init(String flow) throws RemoteException;
 
-    byte[] snapshot(Bundle map) throws RemoteException;
+    byte[] snapshot(Map map) throws RemoteException;
 
     void close() throws RemoteException;
 
@@ -45,30 +49,10 @@ public interface IDroidGuardHandle extends IInterface {
         }
 
         @Override
+        @SuppressWarnings("unchecked")
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             switch (code) {
-                case 0: {
-                    data.enforceInterface(DESCRIPTOR);
-                    String flow = data.readString();
-                    init(flow);
-                    reply.writeNoException();
-                    return true;
-                }
                 case 1: {
-                    data.enforceInterface(DESCRIPTOR);
-                    Bundle map = data.readBundle(getClass().getClassLoader());
-                    byte[] result = snapshot(map);
-                    reply.writeNoException();
-                    reply.writeByteArray(result);
-                    return true;
-                }
-                case 2: {
-                    data.enforceInterface(DESCRIPTOR);
-                    close();
-                    reply.writeNoException();
-                    return true;
-                }
-                case 4: {
                     data.enforceInterface(DESCRIPTOR);
                     String flow = data.readString();
                     DroidGuardResultsRequest request = DroidGuardResultsRequest.CREATOR.createFromParcel(data);
@@ -79,6 +63,25 @@ public interface IDroidGuardHandle extends IInterface {
                     } else {
                         reply.writeInt(0);
                     }
+                    return true;
+                }
+                case 2: {
+                    data.enforceInterface(DESCRIPTOR);
+                    close();
+                    return true;
+                }
+                case 3: {
+                    data.enforceInterface(DESCRIPTOR);
+                    Map map = data.readHashMap(getClass().getClassLoader());
+                    byte[] result = snapshot(map);
+                    reply.writeNoException();
+                    reply.writeByteArray(result);
+                    return true;
+                }
+                case 5: {
+                    data.enforceInterface(DESCRIPTOR);
+                    String flow = data.readString();
+                    init(flow);
                     return true;
                 }
             }
@@ -101,26 +104,24 @@ public interface IDroidGuardHandle extends IInterface {
         @Override
         public void init(String flow) throws RemoteException {
             Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
                 data.writeString(flow);
-                mRemote.transact(0, data, reply, 0);
-                reply.readException();
+                mRemote.transact(5, data, null, android.os.IBinder.FLAG_ONEWAY);
             } finally {
-                reply.recycle();
                 data.recycle();
             }
         }
 
         @Override
-        public byte[] snapshot(Bundle map) throws RemoteException {
+        @SuppressWarnings("unchecked")
+        public byte[] snapshot(Map map) throws RemoteException {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
-                data.writeBundle(map);
-                mRemote.transact(1, data, reply, 0);
+                data.writeMap(map);
+                mRemote.transact(3, data, reply, 0);
                 reply.readException();
                 return reply.createByteArray();
             } finally {
@@ -147,8 +148,9 @@ public interface IDroidGuardHandle extends IInterface {
             try {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
                 data.writeString(flow);
+                data.writeInt(1);
                 request.writeToParcel(data, 0);
-                mRemote.transact(4, data, reply, 0);
+                mRemote.transact(1, data, reply, 0);
                 reply.readException();
                 return DroidGuardInitReply.CREATOR.createFromParcel(reply);
             } finally {

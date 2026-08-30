@@ -208,11 +208,7 @@ public class MainActivity extends Activity {
             data.put("app", "com.digivasserver.demo");
             data.put("step", "1");
             log("snapshot(...) -> remote server begin+snapshot");
-            Bundle args = new Bundle();
-            for (Map.Entry<Object, Object> e : data.entrySet()) {
-                args.putString(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
-            }
-            byte[] blob = handle.snapshot(args);
+            byte[] blob = handle.snapshot(data);
             log("snapshot bytes=" + blob.length);
             log("token(text)=" + new String(blob, StandardCharsets.UTF_8));
 
