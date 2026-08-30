@@ -81,6 +81,7 @@ jobs:
               python3 "$GITHUB_WORKSPACE/dexdump_stub.py" || true
             fi
           done
+          cd /tmp
           rm -rf /tmp/dex-x || true
           echo "===== end dexdump ====="
           # microG's assembleRelease output is unsigned; sign for install
