@@ -183,53 +183,112 @@ public class MainActivity extends Activity {
                     log("code " + code + " produced " + got + " (not droidguard)");
                 }
             }
-            finishDemo("FAILED no broker code matched");
+            finishDemo("FAILED no broker code matched", false);
         } catch (Exception e) {
             log("sweep threw: " + e);
             for (StackTraceElement el : e.getStackTrace()) {
                 log("  at " + el.getClassName() + "." + el.getMethodName() + ":" + el.getLineNumber());
             }
-            finishDemo("FAILED sweep " + e);
+            finishDemo("FAILED sweep " + e, false);
         }
     }
 
-    private void runDroidGuardDemo(IDroidGuardService svc) {
-        try {
-            log("IDroidGuardService obtained");
-            IDroidGuardHandle handle = svc.getHandle();
-            log("handle: " + handle.getClass().getSimpleName());
+    private static final String MARKER_PATH = "/data/local/tmp/demo_result.txt";
 
-            DroidGuardResultsRequest request = new DroidGuardResultsRequest();
-            request.bundle.putString("nonce", "demo-2026");
-            log("initWithRequest(flow=playintegrity)");
-            handle.initWithRequest("playintegrity", request);
+    private void runDroidGuardDemo(final IDroidGuardService svc) {
+        // Run on a background thread so we can pace the steps with sleeps while the UI
+        // thread keeps rendering each log line -> the screenrecord shows progressive flow.
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    showIntro();
+                    step(900);
+                    log("IDroidGuardService obtained");
+                    step(500);
+                    IDroidGuardHandle handle = svc.getHandle();
+                    log("handle: " + handle.getClass().getSimpleName());
+                    step(600);
 
-            Map<Object, Object> data = new HashMap<>();
-            data.put("app", "com.digivasserver.demo");
-            data.put("step", "1");
-            log("snapshot(...) -> remote server begin+snapshot");
-            byte[] blob = handle.snapshot(data);
-            log("snapshot bytes=" + blob.length);
-            log("token(text)=" + new String(blob, StandardCharsets.UTF_8));
+                    DroidGuardResultsRequest request = new DroidGuardResultsRequest();
+                    request.bundle.putString("nonce", "demo-2026");
+                    log("initWithRequest(flow=playintegrity)");
+                    step(500);
+                    handle.initWithRequest("playintegrity", request);
+                    step(700);
 
-            log("close()");
-            handle.close();
-            finishDemo("DEMO-COMPLETE");
-        } catch (Exception e) {
-            log("demo threw: " + e);
-            for (StackTraceElement el : e.getStackTrace()) {
-                log("  at " + el.getClassName() + "." + el.getMethodName() + ":" + el.getLineNumber());
+                    Map<Object, Object> data = new HashMap<>();
+                    data.put("app", "com.digivasserver.demo");
+                    data.put("step", "1");
+                    log("snapshot(...) -> remote server begin+snapshot");
+                    step(500);
+                    byte[] blob = handle.snapshot(data);
+                    log("snapshot bytes=" + blob.length);
+                    log("token(text)=" + new String(blob, StandardCharsets.UTF_8));
+                    step(700);
+
+                    log("close()");
+                    handle.close();
+                    step(800);
+                    finishDemo("DEMO-COMPLETE", true);
+                } catch (Exception e) {
+                    log("demo threw: " + e);
+                    for (StackTraceElement el : e.getStackTrace()) {
+                        log("  at " + el.getClassName() + "." + el.getMethodName() + ":" + el.getLineNumber());
+                    }
+                    finishDemo("FAILED " + e.getClass().getSimpleName(), false);
+                }
             }
-            finishDemo("FAILED " + e.getClass().getSimpleName());
+        }, "demo-run").start();
+    }
+
+    private void step(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
         }
     }
 
-    private void finishDemo(String marker) {
+    private void showIntro() {
+        log("microG :: remote DroidGuard (Network mode)");
+        log("--------------------------------------------");
+        log("client proxy -> GmsCore broker -> IDroidGuardService");
+        log("NetworkHandleFactory -> RemoteHandleImpl -> mock backend");
+        log("session: begin -> snapshot -> close");
+        log("--------------------------------------------");
+    }
+
+    private void finishDemo(final String marker, final boolean success) {
         done = true;
         log("=== " + marker + " ===");
-        logView.setTextColor(marker.startsWith("DEMO") ? Color.rgb(0x2e, 0x7d, 0x32)
-                : Color.rgb(0xb3, 0x1b, 0x1b));
-        writeMarker(getApplicationInfo().dataDir + "/demo_result.txt", marker, ui);
+        // Blink the result colour a few times so the recording isn't a static frame.
+        final int good = Color.rgb(0x2e, 0x7d, 0x32);
+        final int bad = Color.rgb(0xb3, 0x1b, 0x1b);
+        for (int i = 0; i < 3; i++) {
+            ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    logView.setTextColor(success ? good : bad);
+                }
+            });
+            step(180);
+            ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    logView.setTextColor(Color.BLACK);
+                }
+            });
+            step(180);
+        }
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                logView.setTextColor(success ? good : bad);
+            }
+        });
+        // Hold the success screen so the recording captures it.
+        step(2500);
+        writeMarker(MARKER_PATH, marker, ui);
         try {
             unbindService(connection);
         } catch (Exception ignored) {

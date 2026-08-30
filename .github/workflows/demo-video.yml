@@ -138,7 +138,8 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           # warm GmsCore once so the demo isn't first-run cold
           "$ADB" shell "am force-stop com.google.android.gms" || true
-          "$ADB" shell "rm -f /sdcard/demo_result.txt"
+          # the app writes its result marker to /data/local/tmp (world-writable, no root needed)
+          "$ADB" shell "rm -f /data/local/tmp/demo_result.txt"
           "$ADB" logcat -c || true
           # start recording (up to 6 minutes to span the whole sweep sequence)
           "$ADB" shell "screenrecord --time-limit 180 --bit-rate 4000000 /sdcard/demo.mp4" &
@@ -149,7 +150,7 @@ jobs:
           OK=""
           for i in $(seq 1 70); do
             sleep 3
-            R=$("$ADB" shell "cat /sdcard/demo_result.txt 2>/dev/null | tr -d '\r'" || echo "")
+            R=$("$ADB" shell "cat /data/local/tmp/demo_result.txt 2>/dev/null | tr -d '\r'" || echo "")
             if [ -n "$R" ]; then OK=$R; break; fi
           done
           echo "demo_result=$OK"
