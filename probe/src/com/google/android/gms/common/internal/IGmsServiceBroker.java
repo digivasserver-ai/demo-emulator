@@ -8,15 +8,18 @@ import android.os.RemoteException;
 
 /**
  * Hand-written AIDL stub/proxy pair for IGmsServiceBroker.
- * Only the methods the DroidGuard probe uses are implemented
- * (getService = 45, validateAccount = 46). Transaction codes match
- * com.google.android.gms.common.internal.IGmsServiceBroker.aidl.
+ * Only the methods the DroidGuard probe uses are implemented.
+ * Transaction codes are confirmed against the installed microG build
+ * (ci-repro@97b0877) via its IGmsServiceBroker$Stub static fields:
+ *   getDroidGuardService = 13, getService = 46, validateAccount = 47.
  */
 public interface IGmsServiceBroker extends IInterface {
 
     void getService(IGmsCallbacks callback, GetServiceRequest request) throws RemoteException;
 
     void validateAccount(IGmsCallbacks callback, ValidateAccountRequest request) throws RemoteException;
+
+    void getDroidGuardService(IGmsCallbacks callback, int versionCode, String packageName, Bundle params) throws RemoteException;
 
     abstract class Stub extends android.os.Binder implements IGmsServiceBroker {
         public static final String DESCRIPTOR = "com.google.android.gms.common.internal.IGmsServiceBroker";
@@ -57,6 +60,16 @@ public interface IGmsServiceBroker extends IInterface {
                     IGmsCallbacks cb = IGmsCallbacks.Stub.asInterface(data.readStrongBinder());
                     ValidateAccountRequest request = ValidateAccountRequest.CREATOR.createFromParcel(data);
                     validateAccount(cb, request);
+                    reply.writeNoException();
+                    return true;
+                }
+                case 13: {
+                    data.enforceInterface(DESCRIPTOR);
+                    IGmsCallbacks cb = IGmsCallbacks.Stub.asInterface(data.readStrongBinder());
+                    int versionCode = data.readInt();
+                    String packageName = data.readString();
+                    Bundle params = data.readBundle(getClass().getClassLoader());
+                    getDroidGuardService(cb, versionCode, packageName, params);
                     reply.writeNoException();
                     return true;
                 }
@@ -102,6 +115,24 @@ public interface IGmsServiceBroker extends IInterface {
                 data.writeStrongBinder(callback != null ? callback.asBinder() : null);
                 request.writeToParcel(data, 0);
                 mRemote.transact(46, data, reply, 0);
+                reply.readException();
+            } finally {
+                reply.recycle();
+                data.recycle();
+            }
+        }
+
+        @Override
+        public void getDroidGuardService(IGmsCallbacks callback, int versionCode, String packageName, Bundle params) throws RemoteException {
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(Stub.DESCRIPTOR);
+                data.writeStrongBinder(callback != null ? callback.asBinder() : null);
+                data.writeInt(versionCode);
+                data.writeString(packageName);
+                data.writeBundle(params);
+                mRemote.transact(13, data, reply, 0);
                 reply.readException();
             } finally {
                 reply.recycle();

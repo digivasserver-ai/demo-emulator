@@ -115,9 +115,10 @@ public class MainActivity extends Activity {
     private void requestDroidGuardService() {
         try {
             // DroidGuardChimeraService.onBind() returns a DroidGuardServiceBroker
-            // (IGmsServiceBroker). The client AIDL defines getDroidGuardService=12.
+            // (IGmsServiceBroker). Confirmed tx code for getDroidGuardService in the
+            // installed microG build is 13 (TRANSACTION_getDroidGuardService=0xd).
             // Try the compiled proxy first (correct parcel format); if it fails, sweep.
-            log("trying client getDroidGuardService (code 12) via AIDL proxy");
+            log("trying client getDroidGuardService (code 13) via AIDL proxy");
             cbResult = null;
             cbLatch = new java.util.concurrent.CountDownLatch(1);
             try {
@@ -138,11 +139,11 @@ public class MainActivity extends Activity {
                 log("proxy getDroidGuardService threw: " + e);
             }
 
-            // Fallback: sweep raw transact codes (server may use different code for getDroidGuardService).
-            // Known from DEX: getService=42, validateAccount=46, getWalletServiceWithPackageName=47.
-            // getDroidGuardService is in the packed-switch (code varies).
+            // Fallback: sweep raw transact codes. Confirmed from installed build (smali
+            // field constants): getDroidGuardService=13, getService=46, validateAccount=47,
+            // getWalletServiceWithPackageName=42. 13 first since it is the confirmed droidguard code.
             log("falling back to raw transact sweep");
-            final int[] codes = {12, 42, 45, 41, 25, 26, 24, 23, 46, 47, 28};
+            final int[] codes = {13, 46, 47, 42, 12, 45, 41, 25, 26, 24, 23, 28};
             log("broker code sweep: " + java.util.Arrays.toString(codes));
             for (final int code : codes) {
                 cbResult = null;
