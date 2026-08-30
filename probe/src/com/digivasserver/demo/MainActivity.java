@@ -286,8 +286,8 @@ public class MainActivity extends Activity {
                 logView.setTextColor(success ? good : bad);
             }
         });
-        // Hold the success screen so the recording captures it.
-        step(2500);
+        // Hold the success screen so the recording clearly captures the final state.
+        step(4500);
         writeMarker(MARKER_PATH, marker, ui);
         try {
             unbindService(connection);

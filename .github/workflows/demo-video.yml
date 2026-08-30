@@ -138,8 +138,11 @@ jobs:
           ADB="$ANDROID_HOME/platform-tools/adb"
           # warm GmsCore once so the demo isn't first-run cold
           "$ADB" shell "am force-stop com.google.android.gms" || true
-          # the app writes its result marker to /data/local/tmp (world-writable, no root needed)
-          "$ADB" shell "rm -f /data/local/tmp/demo_result.txt"
+          # The app writes its result marker to /data/local/tmp. The dir is traversable (--x)
+          # for the app UID but NOT writable, so pre-create a world-writable (666) file the app
+          # can open and truncate (FileOutputStream). Without this the app hits EACCES.
+          "$ADB" shell "touch /data/local/tmp/demo_result.txt && chmod 666 /data/local/tmp/demo_result.txt"
+          "$ADB" shell "ls -l /data/local/tmp/demo_result.txt"
           "$ADB" logcat -c || true
           # start recording (up to 6 minutes to span the whole sweep sequence)
           "$ADB" shell "screenrecord --time-limit 180 --bit-rate 4000000 /sdcard/demo.mp4" &
