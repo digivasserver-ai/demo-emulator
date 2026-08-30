@@ -154,8 +154,10 @@ public interface IDroidGuardHandle extends IInterface {
                 request.writeToParcel(data, 0);
                 mRemote.transact(5, data, reply, 0);
                 reply.readException();
-                reply.readInt(); // readTypedObject present-flag (1 when non-null)
-                return DroidGuardInitReply.CREATOR.createFromParcel(reply);
+                // readTypedObject semantics: present-flag 0 => null, 1 => object.
+                // RemoteHandleImpl.initWithRequest returns null, so expect 0 here.
+                return reply.readInt() == 0 ? null
+                        : DroidGuardInitReply.CREATOR.createFromParcel(reply);
             } finally {
                 reply.recycle();
                 data.recycle();

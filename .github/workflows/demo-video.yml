@@ -106,6 +106,13 @@ jobs:
           "$ADB" root
           sleep 3
           timeout 60 "$ADB" wait-for-device || true
+          # Disable StrictMode network penalties (NetworkOnMainThreadException) globally.
+          # GmsCore fires the DroidGuard handle's HTTP on its own binder dispatch thread,
+          # which appears "main" to StrictMode. persist.sys.strictmode.disable is read by
+          # StrictMode's static init on process start; we set it before the GmsCore process
+          # is (re)started in the demo step so the fresh process picks it up.
+          "$ADB" shell "setprop persist.sys.strictmode.disable 1" || true
+          "$ADB" shell "getprop persist.sys.strictmode.disable" || true
           "$ADB" shell "am force-stop com.google.android.gms" || true
           "$ADB" shell "mkdir -p /data/data/com.google.android.gms/shared_prefs" || true
           GMS_UID=$("$ADB" shell "cmd package list packages -U" | awk '/package:com.google.android.gms/{v=$NF; sub(/^uid:/,"",v); print v; exit}' | tr -d '\r')
