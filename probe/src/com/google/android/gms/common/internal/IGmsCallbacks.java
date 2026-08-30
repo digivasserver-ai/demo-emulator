@@ -8,8 +8,10 @@ import android.os.RemoteException;
 
 /**
  * Hand-written AIDL stub for IGmsCallbacks.
- * Transaction codes: onPostInitComplete=0, onAccountValidationComplete=1,
- * onPostInitCompleteWithConnectionInfo=2 (declaration order).
+ * Transaction codes confirmed against the installed microG build smali
+ * (IGmsCallbacks$Stub static fields): onPostInitComplete=1,
+ * onAccountValidationComplete=2, onPostInitCompleteWithConnectionInfo=3.
+ * (NOTE: off by one from AIDL declaration order in this build.)
  */
 public interface IGmsCallbacks extends IInterface {
 
@@ -45,7 +47,7 @@ public interface IGmsCallbacks extends IInterface {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             switch (code) {
-                case 0: {
+                case 1: {
                     data.enforceInterface(DESCRIPTOR);
                     int statusCode = data.readInt();
                     IBinder binder = data.readStrongBinder();
@@ -54,7 +56,7 @@ public interface IGmsCallbacks extends IInterface {
                     reply.writeNoException();
                     return true;
                 }
-                case 1: {
+                case 2: {
                     data.enforceInterface(DESCRIPTOR);
                     int statusCode = data.readInt();
                     Bundle params = data.readBundle(getClass().getClassLoader());
@@ -62,7 +64,7 @@ public interface IGmsCallbacks extends IInterface {
                     reply.writeNoException();
                     return true;
                 }
-                case 2: {
+                case 3: {
                     data.enforceInterface(DESCRIPTOR);
                     int statusCode = data.readInt();
                     IBinder binder = data.readStrongBinder();
@@ -102,7 +104,7 @@ public interface IGmsCallbacks extends IInterface {
                 data.writeInt(statusCode);
                 data.writeStrongBinder(binder);
                 data.writeBundle(params);
-                mRemote.transact(0, data, reply, 0);
+                mRemote.transact(1, data, reply, 0);
                 reply.readException();
             } finally {
                 reply.recycle();
@@ -118,7 +120,7 @@ public interface IGmsCallbacks extends IInterface {
                 data.writeInterfaceToken(Stub.DESCRIPTOR);
                 data.writeInt(statusCode);
                 data.writeBundle(params);
-                mRemote.transact(1, data, reply, 0);
+                mRemote.transact(2, data, reply, 0);
                 reply.readException();
             } finally {
                 reply.recycle();
@@ -139,7 +141,7 @@ public interface IGmsCallbacks extends IInterface {
                 } else {
                     data.writeInt(0);
                 }
-                mRemote.transact(2, data, reply, 0);
+                mRemote.transact(3, data, reply, 0);
                 reply.readException();
             } finally {
                 reply.recycle();
