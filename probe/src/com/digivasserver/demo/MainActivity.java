@@ -114,44 +114,71 @@ public class MainActivity extends Activity {
 
     private void requestDroidGuardService() {
         try {
-            // DroidGuardChimeraService.onBind() returns a DroidGuardServiceBroker
-            // (IGmsServiceBroker). Confirmed tx code for getDroidGuardService in the
-            // installed microG build is 13 (TRANSACTION_getDroidGuardService=0xd).
-            // Try the compiled proxy first (correct parcel format); if it fails, sweep.
-            log("trying client getDroidGuardService (code 13) via AIDL proxy");
+            // The source AIDL has getDroidGuardService=12, but the R8-minified
+            // installed APK has it at 13 (all codes shifted +1).  The AIDL proxy
+            // would send code 12 → wrong method → silent failure.  Instead, go
+            // straight to raw transact with the CONFIRMED installed codes.
+            //
+            // Installed APK confirmed codes (from smali constants):
+            //   getDroidGuardService = 13
+            //   getService           = 46
+            //   validateAccount      = 47
+            //   getWalletServiceWithPackageName = 42
+            //
+            // Parcel format for getDroidGuardService(IGmsCallbacks, int, String, Bundle):
+            //   writeInterfaceToken(IGmsServiceBroker descriptor)
+            //   writeStrongBinder(callbacks.asBinder())
+            //   writeInt(serviceId)
+            //   writeString(packageName)
+            //   writeBundle(params)
+
+            log("raw transact: getDroidGuardService (code 13)");
+
+            // --- Attempt 1: code 13 with old-style envelope ---
             cbResult = null;
             cbLatch = new java.util.concurrent.CountDownLatch(1);
+            android.os.Parcel data = android.os.Parcel.obtain();
+            android.os.Parcel reply = android.os.Parcel.obtain();
+            boolean transacted = false;
             try {
-                IGmsServiceBroker broker = IGmsServiceBroker.Stub.asInterface(rawBinder);
-                broker.getDroidGuardService(callbacks, DROID_GUARD_SERVICE_ID, getPackageName(), null);
-                boolean fired = cbLatch.await(8, java.util.concurrent.TimeUnit.SECONDS);
-                log("proxy getDroidGuardService callbackFired=" + fired);
-                Object got = cbResult;
-                if (got instanceof IDroidGuardService) {
-                    log("MATCHED via proxy getDroidGuardService -> IDroidGuardService");
-                    runDroidGuardDemo((IDroidGuardService) got);
-                    return;
-                }
-                if (got != null) {
-                    log("proxy getDroidGuardService produced " + got + " (not droidguard)");
-                }
+                data.writeInterfaceToken("com.google.android.gms.common.internal.IGmsServiceBroker");
+                data.writeStrongBinder(callbacks.asBinder());
+                data.writeInt(DROID_GUARD_SERVICE_ID);
+                data.writeString(getPackageName());
+                data.writeBundle(null);
+                transacted = rawBinder.transact(13, data, reply, 0);
+                reply.readException();
+                log("code 13 transact=" + transacted + " @ " + now());
             } catch (Exception e) {
-                log("proxy getDroidGuardService threw: " + e);
+                log("code 13 threw: " + e);
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+            try {
+                boolean fired = cbLatch.await(8, java.util.concurrent.TimeUnit.SECONDS);
+                log("code 13 callbackFired=" + fired);
+            } catch (InterruptedException ie) {
+                log("interrupted: " + ie);
+            }
+            Object got = cbResult;
+            if (got instanceof IDroidGuardService) {
+                log("MATCHED code 13 -> IDroidGuardService");
+                runDroidGuardDemo((IDroidGuardService) got);
+                return;
+            }
+            if (got != null) {
+                log("code 13 produced " + got + " (not droidguard)");
             }
 
-            // Fallback: sweep raw transact codes. Confirmed from installed build (smali
-            // field constants): getDroidGuardService=13, getService=46, validateAccount=47,
-            // getWalletServiceWithPackageName=42. 13 first since it is the confirmed droidguard code.
-            log("falling back to raw transact sweep");
-            final int[] codes = {13, 46, 47, 42, 12, 45, 41, 25, 26, 24, 23, 28};
-            log("broker code sweep: " + java.util.Arrays.toString(codes));
-            for (final int code : codes) {
+            // --- Attempt 2: sweep nearby codes (±2 around 13) ---
+            log("sweeping codes around 13: 11..15");
+            final int[] nearby = {11, 12, 14, 15};
+            for (final int code : nearby) {
                 cbResult = null;
                 cbLatch = new java.util.concurrent.CountDownLatch(1);
-                log("try code " + code + " @ " + now());
-                android.os.Parcel data = android.os.Parcel.obtain();
-                android.os.Parcel reply = android.os.Parcel.obtain();
-                boolean transacted = false;
+                data = android.os.Parcel.obtain();
+                reply = android.os.Parcel.obtain();
                 try {
                     data.writeInterfaceToken("com.google.android.gms.common.internal.IGmsServiceBroker");
                     data.writeStrongBinder(callbacks.asBinder());
@@ -160,7 +187,7 @@ public class MainActivity extends Activity {
                     data.writeBundle(null);
                     transacted = rawBinder.transact(code, data, reply, 0);
                     reply.readException();
-                    log("code " + code + " transact=" + transacted + " @ " + now());
+                    log("code " + code + " transact=" + transacted);
                 } catch (Exception e) {
                     log("code " + code + " threw: " + e);
                 } finally {
@@ -168,12 +195,12 @@ public class MainActivity extends Activity {
                     reply.recycle();
                 }
                 try {
-                    boolean fired = cbLatch.await(6, java.util.concurrent.TimeUnit.SECONDS);
+                    boolean fired = cbLatch.await(5, java.util.concurrent.TimeUnit.SECONDS);
                     log("code " + code + " callbackFired=" + fired);
                 } catch (InterruptedException ie) {
                     log("sweep interrupted: " + ie);
                 }
-                Object got = cbResult;
+                got = cbResult;
                 if (got instanceof IDroidGuardService) {
                     log("MATCHED code " + code + " -> IDroidGuardService");
                     runDroidGuardDemo((IDroidGuardService) got);
@@ -183,6 +210,50 @@ public class MainActivity extends Activity {
                     log("code " + code + " produced " + got + " (not droidguard)");
                 }
             }
+
+            // --- Attempt 3: getService (code 46) with GetServiceRequest ---
+            log("trying getService (code 46) with GetServiceRequest");
+            cbResult = null;
+            cbLatch = new java.util.concurrent.CountDownLatch(1);
+            data = android.os.Parcel.obtain();
+            reply = android.os.Parcel.obtain();
+            try {
+                data.writeInterfaceToken("com.google.android.gms.common.internal.IGmsServiceBroker");
+                data.writeStrongBinder(callbacks.asBinder());
+                // GetServiceRequest: write serviceId + packageName + extras
+                data.writeInt(DROID_GUARD_SERVICE_ID);
+                data.writeString(getPackageName());
+                data.writeInt(0); // callingUid
+                data.writeString(null); // accountName
+                data.writeString(null); // authType
+                data.writeStrongBinder(null); // sessionInfo
+                data.writeInt(0); // extraFlags
+                data.writeBundle(null); // extras
+                transacted = rawBinder.transact(46, data, reply, 0);
+                reply.readException();
+                log("code 46 transact=" + transacted);
+            } catch (Exception e) {
+                log("code 46 threw: " + e);
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+            try {
+                boolean fired = cbLatch.await(8, java.util.concurrent.TimeUnit.SECONDS);
+                log("code 46 callbackFired=" + fired);
+            } catch (InterruptedException ie) {
+                log("interrupted: " + ie);
+            }
+            got = cbResult;
+            if (got instanceof IDroidGuardService) {
+                log("MATCHED code 46 -> IDroidGuardService");
+                runDroidGuardDemo((IDroidGuardService) got);
+                return;
+            }
+            if (got != null) {
+                log("code 46 produced " + got + " (not droidguard)");
+            }
+
             finishDemo("FAILED no broker code matched", false);
         } catch (Exception e) {
             log("sweep threw: " + e);
