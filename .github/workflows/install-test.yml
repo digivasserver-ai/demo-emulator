@@ -81,7 +81,7 @@ jobs:
               python3 "$GITHUB_WORKSPACE/dexdump_stub.py" || true
             fi
           done
-          cd /tmp
+          cd "$GITHUB_WORKSPACE"
           rm -rf /tmp/dex-x || true
           echo "===== end dexdump ====="
           # microG's assembleRelease output is unsigned; sign for install
@@ -91,7 +91,7 @@ jobs:
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks /tmp/demo.keystore --ks-pass pass:android \
             --out /tmp/gms-signed.apk /tmp/gms.apk
           "$ADB" install -r /tmp/gms-signed.apk
-          "$ADB" install -r probe/build/demo.apk
+          "$ADB" install -r "$GITHUB_WORKSPACE/probe/build/demo.apk"
           "$ADB" root
           sleep 3
           timeout 60 "$ADB" wait-for-device || true
