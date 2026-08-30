@@ -151,6 +151,8 @@ jobs:
           echo "demo_result=$OK"
           # show probe logcat
           "$ADB" logcat -d -s DGProbe 2>/dev/null | tail -60 || true
+          echo "---- GmsCore/AndroidRuntime logcat ----"
+          "$ADB" logcat -d 2>/dev/null | grep -iE "GmsGuard|RemoteGuard|DroidGuard|NoWhenBranch|AndroidRuntime|FATAL|Exception" | tail -80 || true
           echo "---- server log ----"
           tail -60 /tmp/server.log || true
           # stop recording and pull the video

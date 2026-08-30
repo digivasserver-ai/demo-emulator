@@ -196,7 +196,36 @@ public class MainActivity extends Activity {
     private void runDroidGuardDemo(IDroidGuardService svc) {
         try {
             log("IDroidGuardService obtained");
+            try {
+                log("svc binder descriptor: " + ((android.os.IInterface) svc).asBinder().getInterfaceDescriptor());
+            } catch (Exception e) {
+                log("svc descriptor failed: " + e);
+            }
             IDroidGuardHandle handle = svc.getHandle();
+            log("handle null? " + (handle == null));
+            if (handle == null) {
+                log("getHandle returned null on this build");
+                log("--- raw transact(3) getHandle diagnostic ---");
+                android.os.IBinder asb = ((android.os.IInterface) svc).asBinder();
+                android.os.Parcel d = android.os.Parcel.obtain();
+                android.os.Parcel r = android.os.Parcel.obtain();
+                d.writeInterfaceToken("com.google.android.gms.droidguard.internal.IDroidGuardService");
+                boolean tt = false;
+                try {
+                    tt = asb.transact(3, d, r, 0);
+                    log("raw transact(3) returned " + tt + ", reply size=" + r.dataSize());
+                    r.readException();
+                    log("readException ok, dataPos=" + r.dataPosition());
+                    android.os.IBinder hb = r.readStrongBinder();
+                    log("raw strongBinder null? " + (hb == null) + " pos=" + r.dataPosition());
+                } catch (Exception e) {
+                    log("raw transact(3) threw: " + e);
+                } finally {
+                    r.recycle();
+                    d.recycle();
+                }
+                return;
+            }
             log("handle: " + handle.getClass().getSimpleName());
 
             DroidGuardResultsRequest request = new DroidGuardResultsRequest();
